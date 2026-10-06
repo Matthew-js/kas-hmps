@@ -2,12 +2,13 @@
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import StatCard from '@/components/StatCard.vue'
 import { useKas } from '@/stores/kas'
-import { formatRupiah, formatNumber, formatDate } from '@/utils/format'
+import { formatRupiah, formatAmount, formatDate, MINUS } from '@/utils/format'
 
 const { currentPeriod, openingBalance, ledger, totalIn, totalOut, closingBalance } = useKas()
 
-// Nilai CSV di-escape: tanda kutip digandakan dan selalu diapit kutip (aman untuk koma/kutip di keterangan).
-const csv = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
+// Teks CSV di-escape: tanda kutip digandakan dan diapit kutip (aman untuk koma/kutip di keterangan).
+// Angka ditulis apa adanya tanpa kutip (mis. -70000) agar dibaca sebagai angka oleh Excel.
+const csv = (v) => (typeof v === 'number' ? String(v) : `"${String(v ?? '').replace(/"/g, '""')}"`)
 
 function exportExcel() {
   const lines = [['Tanggal', 'Kategori', 'Uraian', 'Masuk', 'Keluar', 'Saldo']]
@@ -23,7 +24,8 @@ function exportExcel() {
   URL.revokeObjectURL(a.href)
 }
 const exportPdf = () => window.print() // pilih "Simpan sebagai PDF" di dialog cetak
-const signedNumber = (t) => `${t.type === 'in' ? '+' : '-'}${formatNumber(t.amount)}`
+const signedNumber = (t) => `${t.type === 'in' ? '+' : MINUS} ${formatAmount(t.amount)}`
+const toneOf = (n) => (n < 0 ? 'negative' : 'neutral')
 </script>
 
 <template>
@@ -40,10 +42,10 @@ const signedNumber = (t) => `${t.type === 'in' ? '+' : '-'}${formatNumber(t.amou
     </header>
 
     <section class="stats">
-      <StatCard label="Saldo awal" :value="formatRupiah(openingBalance)" />
+      <StatCard label="Saldo awal" :value="formatRupiah(openingBalance)" :tone="toneOf(openingBalance)" />
       <StatCard label="Total pemasukan" :value="formatRupiah(totalIn)" tone="income" />
       <StatCard label="Total pengeluaran" :value="formatRupiah(totalOut)" tone="expense" />
-      <StatCard label="Saldo akhir" :value="formatRupiah(closingBalance)" />
+      <StatCard label="Saldo akhir" :value="formatRupiah(closingBalance)" :tone="toneOf(closingBalance)" />
     </section>
 
     <section class="panel-white ledger">
@@ -55,9 +57,9 @@ const signedNumber = (t) => `${t.type === 'in' ? '+' : '-'}${formatNumber(t.amou
           <tr v-for="t in ledger" :key="t.id">
             <td class="mono">{{ formatDate(t.date, true) }}</td>
             <td>{{ t.note }}</td>
-            <td class="num mono in">{{ t.type === 'in' ? formatNumber(t.amount) : '—' }}</td>
-            <td class="num mono out">{{ t.type === 'out' ? formatNumber(t.amount) : '—' }}</td>
-            <td class="num mono">{{ formatNumber(t.balance) }}</td>
+            <td class="num mono in">{{ t.type === 'in' ? formatAmount(t.amount) : '—' }}</td>
+            <td class="num mono out">{{ t.type === 'out' ? formatAmount(t.amount) : '—' }}</td>
+            <td class="num mono" :class="{ out: t.balance < 0 }">{{ formatRupiah(t.balance) }}</td>
           </tr>
         </tbody>
       </table>
@@ -66,7 +68,7 @@ const signedNumber = (t) => `${t.type === 'in' ? '+' : '-'}${formatNumber(t.amou
         <li v-for="t in ledger" :key="t.id">
           <div>
             <p><span class="mono muted">{{ formatDate(t.date, true) }}</span>&nbsp; {{ t.note }}</p>
-            <p class="muted small">Saldo: {{ formatNumber(t.balance) }}</p>
+            <p class="muted small">Saldo: <span class="mono" :class="{ out: t.balance < 0 }">{{ formatRupiah(t.balance) }}</span></p>
           </div>
           <span class="mono" :class="t.type">{{ signedNumber(t) }}</span>
         </li>

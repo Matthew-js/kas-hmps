@@ -113,7 +113,7 @@ async function submit() {
         <p v-if="errors.openingBalance" class="f__err">{{ errors.openingBalance }}</p>
         <p class="hint">
           <template v-if="previous">
-            Saldo akhir {{ previous.name }} ({{ formatDate(previous.endDate) }}): <strong>{{ formatRupiah(previousClosing) }}</strong>{{ previousClosing < 0 ? ' (minus)' : '' }}.
+            Saldo akhir {{ previous.name }} ({{ formatDate(previous.endDate) }}): <strong :class="{ out: previousClosing < 0 }">{{ formatRupiah(previousClosing) }}</strong>.
             <button v-if="openingTouched && String(previousClosing) !== form.openingBalance" type="button" class="hint__link" @click="openingTouched = false; fillOpening()">Pakai nilai ini</button>
           </template>
           <template v-else>Tidak ada periode sebelum tanggal mulai; isi saldo kas saat ini.</template>

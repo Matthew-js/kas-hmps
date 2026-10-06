@@ -1,7 +1,14 @@
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
 
-export const formatNumber = (n) => Math.abs(n).toLocaleString('id-ID')
-export const formatRupiah = (n) => `Rp ${formatNumber(n)}`
+// Tanda minus memakai U+2212 (−) di seluruh aplikasi, bukan tanda hubung.
+export const MINUS = '\u2212'
+const sign = (n) => (n < 0 ? MINUS : '') // -0 dianggap 0
+
+// Nilai bertanda: saldo, saldo awal/akhir, total. -70000 → "−70.000" / "−Rp 70.000"
+export const formatNumber = (n) => `${sign(n)}${Math.abs(n).toLocaleString('id-ID')}`
+export const formatRupiah = (n) => `${sign(n)}Rp ${Math.abs(n).toLocaleString('id-ID')}`
+// Nilai mutlak tanpa tanda: nominal transaksi yang tandanya sudah ditulis manual ("+ Rp" / "− Rp").
+export const formatAmount = (n) => `Rp ${Math.abs(n).toLocaleString('id-ID')}`
 
 export function formatDate(iso, short = false) {
   const [y, m, d] = iso.split('-')

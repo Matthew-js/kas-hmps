@@ -82,7 +82,7 @@ async function confirmDelete() {
               <td class="mono">{{ range(p) }}</td>
               <td class="num mono">{{ formatRupiah(p.duesAmount) }}</td>
               <td class="num mono">{{ formatRupiah(p.openingBalance) }}</td>
-              <td class="num mono" :class="{ out: closingBalanceOf(p) < 0 }">{{ closingBalanceOf(p) < 0 ? '−' : '' }}{{ formatRupiah(closingBalanceOf(p)) }}</td>
+              <td class="num mono" :class="{ out: closingBalanceOf(p) < 0 }">{{ formatRupiah(closingBalanceOf(p)) }}</td>
               <td v-if="isBendahara" class="num">
                 <span class="actions" style="justify-content: flex-end">
                   <button class="btn-sm" @click="openPeriod(p)">Edit</button>
@@ -107,7 +107,7 @@ async function confirmDelete() {
           <dl class="stats">
             <div><dt>Iuran</dt><dd class="mono">{{ formatRupiah(p.duesAmount) }}</dd></div>
             <div><dt>Saldo awal</dt><dd class="mono">{{ formatRupiah(p.openingBalance) }}</dd></div>
-            <div><dt>Saldo akhir</dt><dd class="mono" :class="{ out: closingBalanceOf(p) < 0 }">{{ closingBalanceOf(p) < 0 ? '−' : '' }}{{ formatRupiah(closingBalanceOf(p)) }}</dd></div>
+            <div><dt>Saldo akhir</dt><dd class="mono" :class="{ out: closingBalanceOf(p) < 0 }">{{ formatRupiah(closingBalanceOf(p)) }}</dd></div>
           </dl>
         </li>
       </ul>

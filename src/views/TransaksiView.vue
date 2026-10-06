@@ -5,7 +5,7 @@ import TransactionFormModal from '@/components/TransactionFormModal.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import { useKas } from '@/stores/kas'
 import { useAuth } from '@/stores/auth'
-import { formatRupiah, formatDate } from '@/utils/format'
+import { formatAmount, formatDate, MINUS } from '@/utils/format'
 
 const PER_PAGE = 8
 const { sorted, allCategories, proofUrl, removeTransaction, scanReceipt } = useKas()
@@ -84,7 +84,7 @@ const pages = computed(() => Math.max(1, Math.ceil(filtered.value.length / PER_P
 const rows = computed(() => filtered.value.slice((page.value - 1) * PER_PAGE, page.value * PER_PAGE))
 watch([query, category, dateFrom, dateTo], () => { page.value = 1 })
 
-const amountText = (t) => `${t.type === 'in' ? '+' : '−'} ${formatRupiah(t.amount)}`
+const amountText = (t) => `${t.type === 'in' ? '+' : MINUS} ${formatAmount(t.amount)}`
 </script>
 
 <template>

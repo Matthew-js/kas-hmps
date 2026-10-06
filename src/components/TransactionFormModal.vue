@@ -14,7 +14,7 @@ const props = defineProps({
   scan: { type: Object, default: null },
 })
 const emit = defineEmits(['close', 'saved'])
-const { categories, addTransaction, updateTransaction, proofUrl, findDuplicates, discardProof } = useKas()
+const { categories, addTransaction, updateTransaction, proofUrl, findDuplicates, discardProof, closingBalance, currentPeriod } = useKas()
 const isEdit = computed(() => !!props.transaction)
 
 const LOW_CONFIDENCE = 0.7
@@ -35,6 +35,17 @@ const keptProof = ref(null) // path bukti lama di Storage (mode edit) selama tid
 
 // 'Iuran anggota' dicatat otomatis dari menu Iuran, jadi tidak ditawarkan di form manual.
 const categoryOptions = computed(() => categories[form.type].filter((c) => c !== 'Iuran anggota'))
+// Saldo akhir periode berjalan seandainya transaksi ini disimpan (hanya untuk peringatan, tidak memblokir).
+// Mode edit: efek nominal lama dikeluarkan dulu agar tidak terhitung dua kali.
+const projectedBalance = computed(() => {
+  const amount = Number(form.amount)
+  if (form.type !== 'out' || !(amount > 0)) return null
+  const p = currentPeriod.value
+  const inPeriod = (d) => p && d >= p.startDate && d <= p.endDate
+  const old = props.transaction
+  const oldEffect = old && inPeriod(old.date) ? (old.type === 'in' ? old.amount : -old.amount) : 0
+  return closingBalance.value - oldEffect - amount
+})
 const amountPreview = computed(() => (Number(form.amount) > 0 ? formatRupiah(Number(form.amount)) : ''))
 const proofSizeText = computed(() =>
   proofSize.value < 1024 * 1024
@@ -175,6 +186,7 @@ async function submit() {
           <input id="tx-amount" v-model="form.amount" class="amount__input" type="number" min="0" inputmode="numeric" placeholder="0" @input="needsCheck.amount = false" />
         </div>
         <p class="amount__hint">{{ amountPreview || 'Masukkan jumlah dalam rupiah' }}</p>
+        <p v-if="projectedBalance !== null && projectedBalance < 0" class="warn" role="status">Pengeluaran ini membuat saldo menjadi {{ formatRupiah(projectedBalance) }}.</p>
         <p v-if="needsCheck.amount" class="check">Wajib dicek <button type="button" class="check__ok" @click="needsCheck.amount = false">Sudah benar</button></p>
       </div>
       <p v-if="errors.amount" class="err">{{ errors.amount }}</p>
@@ -327,6 +339,7 @@ async function submit() {
 .banner--fail { color: var(--color-danger); background: #fbeceb; border: 1px solid #efc9c5; }
 .is-check { padding: 10px; margin: -4px; background: #fdf3d3; border-radius: 12px; box-shadow: inset 0 0 0 1.5px #e3b743; }
 .amount.is-check { margin: 0; padding: 14px 16px 12px; border-color: #e3b743; }
+.warn { margin: 8px 0 0; padding: 6px 10px; font: 600 10px/1.4 var(--font-body); color: #6b4e00; background: #fdf3d3; border: 1px solid #ecd28a; border-radius: 8px; }
 .check { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 0; font: 600 10px var(--font-body); color: #8a6400; }
 .check__ok { padding: 3px 10px; font: 600 10px var(--font-body); color: var(--color-ink); background: var(--color-surface); border: 1px solid #e3b743; border-radius: 999px; cursor: pointer; }
 
@@ -345,7 +358,7 @@ async function submit() {
   .field { height: 44px; font-size: 16px; }
   .chip { padding: 8px 16px; font-size: 13px; }
   .lbl { font-size: 12px; }
-  .banner, .check, .check__ok { font-size: 12px; }
+  .banner, .check, .check__ok, .warn { font-size: 12px; }
   .banner strong { font-size: 13px; }
 }
 @media (max-width: 380px) {

@@ -3,7 +3,7 @@ defineProps({
   label: { type: String, required: true },
   value: { type: String, required: true },
   note: { type: String, default: '' },
-  tone: { type: String, default: 'neutral' }, // 'neutral' | 'income' | 'expense'
+  tone: { type: String, default: 'neutral' }, // 'neutral' | 'income' | 'expense' | 'negative'
 })
 </script>
 
@@ -21,7 +21,7 @@ defineProps({
 .stat__label { font-size: 9px; letter-spacing: 0.03em; text-transform: uppercase; color: var(--color-muted); }
 .stat__value { margin-top: 6px; font: 600 22px var(--font-mono); }
 .stat__value--income { color: var(--color-income); }
-.stat__value--expense { color: var(--color-expense); }
+.stat__value--expense, .stat__value--negative { color: var(--color-expense); }
 .stat__note { margin-top: 4px; font-size: 10px; color: var(--color-muted); }
 @media (max-width: 768px) {
   .stat { padding: 14px 16px; }

@@ -37,6 +37,7 @@ const db = {
     { id: 6, date: '2026-08-28', type: 'in', category: 'Iuran mingguan', note: 'Iuran kas minggu ke-8', amount: 150000 },
   ],
   duesPayments: [], // { id, memberId, periodId, amount }
+  receiptScans: [], // { id, proof, transactionId }
 }
 
 // Demo: tambahkan periode bulan berjalan agar pembayaran iuran hari ini terlihat di laporan.
@@ -158,6 +159,31 @@ export const memoryRepo = {
     async upload(file) { return `lokal/${file.name}` }, // tidak benar-benar diunggah
     async remove() {},
     async url() { return null },
+  },
+
+  receipts: {
+    // Mode demo: tidak memanggil AI; kembalikan nota tiruan setelah jeda singkat.
+    // Kategori sengaja ber-confidence rendah agar sorotan "wajib dicek" bisa dicoba.
+    async scan(file) {
+      await new Promise((r) => setTimeout(r, 1200))
+      const proof = `lokal/${file.name}`
+      if (/gagal|blur|buram/i.test(file.name)) return { proof, scanId: null, result: null, error: 'unreadable' }
+      const scanId = ++seq
+      db.receiptScans.push({ id: scanId, proof, transactionId: null })
+      return {
+        proof, scanId, error: null,
+        result: {
+          date: today(), merchant: 'Indomaret Keputih', total: 47500,
+          items: [{ name: 'Air mineral 600ml', qty: 10, price: 35000 }, { name: 'Roti tawar', qty: 1, price: 12500 }],
+          category: 'Konsumsi',
+          confidence: { date: 0.95, total: 0.92, category: 0.55 },
+        },
+      }
+    },
+    async link(scanId, transactionId) {
+      const s = db.receiptScans.find((x) => x.id === scanId)
+      if (s) s.transactionId = transactionId
+    },
   },
 
   dues: {

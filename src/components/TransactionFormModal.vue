@@ -2,13 +2,25 @@
 import { reactive, ref, computed, watch } from 'vue'
 import AppModal from './AppModal.vue'
 import { useKas } from '@/stores/kas'
-import { formatRupiah, todayISO as today } from '@/utils/format'
+import { scanErrorMessage } from '@/lib/errors'
+import { formatRupiah, formatDate, todayISO as today } from '@/utils/format'
 
 // `transaction` diisi → mode edit; kosong → catat transaksi baru.
-const props = defineProps({ open: Boolean, transaction: { type: Object, default: null } })
+// `scan` diisi ({ proof, scanId, result, error } dari scanReceipt) → form terisi dari hasil Scan Nota.
+// Form ini tidak pernah menyimpan sendiri: transaksi baru dibuat hanya saat pengguna menekan Simpan.
+const props = defineProps({
+  open: Boolean,
+  transaction: { type: Object, default: null },
+  scan: { type: Object, default: null },
+})
 const emit = defineEmits(['close', 'saved'])
-const { categories, addTransaction, updateTransaction, proofUrl } = useKas()
+const { categories, addTransaction, updateTransaction, proofUrl, findDuplicates, discardProof } = useKas()
 const isEdit = computed(() => !!props.transaction)
+
+const LOW_CONFIDENCE = 0.7
+const needsCheck = reactive({ amount: false, date: false, category: false }) // sorotan kuning "wajib dicek"
+const duplicates = ref([]) // transaksi lain dengan nominal & tanggal sama; ditampilkan sebelum Simpan
+const scanProofUsed = ref(false) // foto scan dipakai sebagai bukti transaksi yang tersimpan
 
 const blank = () => ({ type: 'in', category: '', amount: '', date: today(), note: '', proof: null })
 const form = reactive(blank())
@@ -30,11 +42,25 @@ const proofSizeText = computed(() =>
     : `${(proofSize.value / 1024 / 1024).toFixed(1)} MB`,
 )
 
+// "Indomaret – Air mineral, Roti tawar +2 lainnya"
+function scanNote({ merchant, items }) {
+  const names = (items ?? []).map((i) => i.name)
+  const list = names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3} lainnya` : '')
+  return [merchant, list].filter(Boolean).join(' – ')
+}
+
 watch(() => props.open, (open) => {
   if (!open) return
   const t = props.transaction
-  Object.assign(form, t ? { type: t.type, category: t.category, amount: String(t.amount), date: t.date, note: t.note, proof: null } : blank())
-  keptProof.value = t?.proof ?? null
+  const r = props.scan?.result
+  if (t) Object.assign(form, { type: t.type, category: t.category, amount: String(t.amount), date: t.date, note: t.note, proof: null })
+  else if (r) Object.assign(form, { type: 'out', category: r.category ?? '', amount: r.total ? String(r.total) : '', date: r.date ?? today(), note: scanNote(r), proof: null })
+  else Object.assign(form, { ...blank(), type: props.scan ? 'out' : 'in' })
+  keptProof.value = t?.proof ?? props.scan?.proof ?? null
+  const low = (field, conf) => !!r && (r[field] === null || (conf ?? 0) < LOW_CONFIDENCE)
+  Object.assign(needsCheck, { amount: low('total', r?.confidence?.total), date: low('date', r?.confidence?.date), category: low('category', r?.confidence?.category) })
+  duplicates.value = []
+  scanProofUsed.value = false
   Object.assign(errors, { category: '', amount: '', date: '', note: '', proof: '' })
   proofSize.value = 0
   proofFile.value = null
@@ -70,12 +96,31 @@ async function viewKeptProof() {
   }
 }
 
+// Semua jalur tutup lewat sini: foto scan yang tidak dipakai dihapus dari Storage agar tidak menjadi berkas yatim.
+function close() {
+  if (saving.value) return
+  if (props.scan?.proof && !scanProofUsed.value) discardProof(props.scan.proof)
+  emit('close')
+}
+
+const isScanProof = computed(() => !!props.scan?.proof && keptProof.value === props.scan.proof)
+watch(() => [form.amount, form.date], () => { duplicates.value = [] })
+
 async function submit() {
   errors.category = form.category ? '' : 'Pilih kategori.'
   errors.amount = Number.isInteger(Number(form.amount)) && Number(form.amount) > 0 ? '' : 'Nominal harus bilangan bulat lebih dari 0.'
   errors.date = form.date && form.date <= today() ? '' : 'Tanggal wajib diisi dan tidak boleh di masa depan.'
   errors.note = form.note.trim() ? '' : 'Keterangan wajib diisi.'
   if (errors.category || errors.amount || errors.date || errors.note || errors.proof) return
+  if (needsCheck.amount || needsCheck.date || needsCheck.category) {
+    saveError.value = 'Periksa dulu kolom yang disorot kuning: ubah nilainya atau tekan “Sudah benar”.'
+    return
+  }
+  // Peringatan duplikat: klik Simpan pertama hanya menampilkan peringatan, klik kedua menyimpan.
+  if (!duplicates.value.length) {
+    const dup = findDuplicates(Number(form.amount), form.date, props.transaction?.id ?? null)
+    if (dup.length) { duplicates.value = dup; saveError.value = ''; return }
+  }
   saving.value = true
   saveError.value = ''
   try {
@@ -83,10 +128,13 @@ async function submit() {
     if (isEdit.value) {
       await updateTransaction(props.transaction.id, data, { file: proofFile.value, removeProof: !keptProof.value })
     } else {
-      await addTransaction(data, proofFile.value)
+      await addTransaction(data, proofFile.value, { proofPath: keptProof.value, scanId: props.scan?.scanId ?? null })
+      // Foto scan tetap dipakai kecuali dihapus/diganti; jika diganti, store sudah menghapusnya.
+      scanProofUsed.value = !!props.scan?.proof && (isScanProof.value || !!proofFile.value)
     }
     emit('saved')
-    emit('close')
+    saving.value = false
+    close()
   } catch (e) {
     saveError.value = e.message
   } finally {
@@ -96,8 +144,17 @@ async function submit() {
 </script>
 
 <template>
-  <AppModal :open="open" :title="isEdit ? 'Edit transaksi' : 'Catat transaksi baru'" width="440px" @close="emit('close')">
+  <AppModal :open="open" :title="isEdit ? 'Edit transaksi' : scan ? 'Catat dari scan nota' : 'Catat transaksi baru'" width="440px" @close="close">
     <form class="tx" :class="`tx--${form.type}`" novalidate @submit.prevent="submit">
+      <div v-if="scan?.result" class="banner banner--scan" role="status">
+        <strong>Hasil scan otomatis — periksa nominal, tanggal, dan kategori</strong>
+        <span>Belum ada yang disimpan. Kolom bersorot kuning wajib dicek sebelum menekan Simpan.</span>
+      </div>
+      <div v-else-if="scan?.error" class="banner banner--fail" role="alert">
+        <strong>Scan nota gagal</strong>
+        <span>{{ scanErrorMessage(scan.error) }}</span>
+      </div>
+
       <!-- Jenis transaksi -->
       <div class="seg" role="radiogroup" aria-label="Jenis transaksi">
         <button type="button" role="radio" :aria-checked="form.type === 'in'" class="seg__item seg__item--in" :class="{ 'is-on': form.type === 'in' }" @click="form.type = 'in'">
@@ -111,33 +168,36 @@ async function submit() {
       </div>
 
       <!-- Kartu nominal -->
-      <div class="amount">
+      <div class="amount" :class="{ 'is-check': needsCheck.amount }">
         <label for="tx-amount" class="amount__label">{{ form.type === 'in' ? 'Nominal pemasukan' : 'Nominal pengeluaran' }}</label>
         <div class="amount__row">
           <span class="amount__rp">Rp</span>
-          <input id="tx-amount" v-model="form.amount" class="amount__input" type="number" min="0" inputmode="numeric" placeholder="0" />
+          <input id="tx-amount" v-model="form.amount" class="amount__input" type="number" min="0" inputmode="numeric" placeholder="0" @input="needsCheck.amount = false" />
         </div>
         <p class="amount__hint">{{ amountPreview || 'Masukkan jumlah dalam rupiah' }}</p>
+        <p v-if="needsCheck.amount" class="check">Wajib dicek <button type="button" class="check__ok" @click="needsCheck.amount = false">Sudah benar</button></p>
       </div>
       <p v-if="errors.amount" class="err">{{ errors.amount }}</p>
 
       <!-- Kategori -->
-      <div class="block">
+      <div class="block" :class="{ 'is-check': needsCheck.category }">
         <span id="tx-cat-label" class="lbl">Kategori</span>
         <div class="chips" role="radiogroup" aria-labelledby="tx-cat-label">
           <button
             v-for="c in categoryOptions" :key="c" type="button" role="radio"
             class="chip" :class="{ 'is-on': form.category === c }" :aria-checked="form.category === c"
-            @click="form.category = c"
+            @click="form.category = c; needsCheck.category = false"
           >{{ c }}</button>
         </div>
+        <p v-if="needsCheck.category" class="check">Wajib dicek{{ form.category ? '' : ' — kategori tidak terbaca, pilih salah satu' }} <button v-if="form.category" type="button" class="check__ok" @click="needsCheck.category = false">Sudah benar</button></p>
         <p v-if="errors.category" class="err">{{ errors.category }}</p>
       </div>
 
       <!-- Tanggal -->
-      <div class="block">
+      <div class="block" :class="{ 'is-check': needsCheck.date }">
         <label for="tx-date" class="lbl">Tanggal</label>
-        <input id="tx-date" v-model="form.date" class="field" type="date" :max="today()" />
+        <input id="tx-date" v-model="form.date" class="field" type="date" :max="today()" @input="needsCheck.date = false" />
+        <p v-if="needsCheck.date" class="check">Wajib dicek{{ scan?.result?.date ? '' : ' — tanggal tidak terbaca, diisi hari ini' }} <button type="button" class="check__ok" @click="needsCheck.date = false">Sudah benar</button></p>
         <p v-if="errors.date" class="err">{{ errors.date }}</p>
       </div>
 
@@ -157,7 +217,7 @@ async function submit() {
           </span>
           <span class="file__info">
             <strong>{{ keptProof.split('/').pop() }}</strong>
-            <small>Bukti tersimpan · <button type="button" class="file__link" @click="viewKeptProof">lihat</button> · <label class="file__link">ganti<input type="file" accept=".jpg,.jpeg,.png,.pdf" hidden @change="pickFile($event.target.files[0])" /></label></small>
+            <small>{{ isScanProof ? 'Foto nota hasil scan' : 'Bukti tersimpan' }} · <button type="button" class="file__link" @click="viewKeptProof">lihat</button> · <label class="file__link">ganti<input type="file" accept=".jpg,.jpeg,.png,.pdf" hidden @change="pickFile($event.target.files[0])" /></label></small>
           </span>
           <button type="button" class="file__remove" aria-label="Hapus bukti" title="Hapus bukti" @click="keptProof = null">✕</button>
         </div>
@@ -185,10 +245,16 @@ async function submit() {
         </p>
       </div>
 
+      <div v-if="duplicates.length" class="banner banner--dup" role="alert">
+        <strong>Kemungkinan transaksi ganda</strong>
+        <span>Sudah ada {{ duplicates.length }} transaksi {{ formatRupiah(Number(form.amount)) }} pada {{ formatDate(form.date) }}:</span>
+        <ul><li v-for="d in duplicates.slice(0, 3)" :key="d.id">{{ d.note }} ({{ d.category }})</li></ul>
+        <span>Tekan “Tetap simpan” jika memang transaksi berbeda.</span>
+      </div>
       <p v-if="saveError" class="err" role="alert">{{ saveError }}</p>
       <div class="actions-row">
-        <button type="submit" class="btn-save" :disabled="saving">{{ saving ? 'Menyimpan…' : 'Simpan' }}</button>
-        <button type="button" class="btn-cancel" @click="emit('close')">Batal</button>
+        <button type="submit" class="btn-save" :disabled="saving">{{ saving ? 'Menyimpan…' : duplicates.length ? 'Tetap simpan' : 'Simpan' }}</button>
+        <button type="button" class="btn-cancel" :disabled="saving" @click="close">Batal</button>
       </div>
     </form>
   </AppModal>
@@ -253,6 +319,17 @@ async function submit() {
 .file__link { padding: 0; font: 600 10px var(--font-body); color: var(--color-gold-hover); background: none; border: 0; text-decoration: underline; cursor: pointer; }
 .hint { margin: 0; font-size: 10px; color: var(--color-muted); }
 
+/* Scan nota: banner & sorotan kolom yang wajib dicek */
+.banner { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; font-size: 11px; line-height: 1.45; border-radius: 10px; }
+.banner strong { font-size: 12px; }
+.banner ul { margin: 2px 0; padding-left: 18px; }
+.banner--scan, .banner--dup { color: #6b4e00; background: #fdf3d3; border: 1px solid #ecd28a; }
+.banner--fail { color: var(--color-danger); background: #fbeceb; border: 1px solid #efc9c5; }
+.is-check { padding: 10px; margin: -4px; background: #fdf3d3; border-radius: 12px; box-shadow: inset 0 0 0 1.5px #e3b743; }
+.amount.is-check { margin: 0; padding: 14px 16px 12px; border-color: #e3b743; }
+.check { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 0; font: 600 10px var(--font-body); color: #8a6400; }
+.check__ok { padding: 3px 10px; font: 600 10px var(--font-body); color: var(--color-ink); background: var(--color-surface); border: 1px solid #e3b743; border-radius: 999px; cursor: pointer; }
+
 /* Aksi */
 .actions-row { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; margin-top: 4px; }
 .btn-save, .btn-cancel { height: 44px; font: 600 14px var(--font-body); color: var(--color-ink); border-radius: 10px; cursor: pointer; }
@@ -268,6 +345,8 @@ async function submit() {
   .field { height: 44px; font-size: 16px; }
   .chip { padding: 8px 16px; font-size: 13px; }
   .lbl { font-size: 12px; }
+  .banner, .check, .check__ok { font-size: 12px; }
+  .banner strong { font-size: 13px; }
 }
 @media (max-width: 380px) {
   .seg { grid-template-columns: 1fr; }

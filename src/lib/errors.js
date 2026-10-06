@@ -27,3 +27,19 @@ export function rethrow(e, overrides) {
   err.cause = e
   throw err
 }
+
+// Pesan untuk kode kegagalan Scan Nota (dari Edge Function `scan-nota` / repo.receipts.scan).
+const SCAN_ERRORS = {
+  timeout: 'Pembacaan nota melebihi 30 detik.',
+  unreadable: 'Nota tidak terbaca (foto buram, terpotong, atau bukan nota).',
+  ai_error: 'Layanan pembaca nota sedang bermasalah.',
+  network: 'Gagal terhubung ke server pembaca nota.',
+  unauthorized: 'Sesi login berakhir. Silakan login ulang.',
+  forbidden: 'Hanya bendahara yang dapat memakai Scan Nota.',
+  too_large: 'Ukuran foto maksimal 2MB.',
+  bad_type: 'Format foto harus JPG atau PNG.',
+  rate_limited: 'Kuota gratis pembaca nota sedang habis (batas per menit/hari). Coba lagi beberapa saat lagi.',
+  not_deployed: 'Layanan Scan Nota belum dipasang di server (Edge Function "scan-nota" belum di-deploy).',
+}
+export const scanErrorMessage = (code) =>
+  `${SCAN_ERRORS[code] ?? 'Scan nota gagal.'} Silakan isi transaksi secara manual; foto tetap terlampir sebagai bukti.`

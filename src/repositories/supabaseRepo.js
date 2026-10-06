@@ -10,6 +10,18 @@ const DUP_CATEGORY = { 23505: 'Nama kategori sudah ada untuk jenis ini.' }
 // DELETE yang diblokir RLS tidak mengembalikan error, hanya 0 baris; jangan anggap berhasil.
 const mustAffect = (rows) => { if (!rows?.length) rethrow({ code: 'PGRST116' }) }
 
+const SCAN_TIMEOUT_MS = 30_000
+// Ambil kode error dari respons Edge Function non-2xx (401/403/413/…).
+async function scanErrorCode(error) {
+  if (/abort|timeout/i.test(`${error?.name} ${error?.message}`)) return 'timeout'
+  try {
+    const body = await error.context?.json()
+    // 404 dari gateway Supabase (bukan dari function kita) = function belum di-deploy.
+    if (body?.code === 'NOT_FOUND') return 'not_deployed'
+    return body?.code ?? 'ai_error'
+  } catch { return 'ai_error' }
+}
+
 const toTx = (r) => ({
   id: r.id, date: r.date, type: r.type, category: r.category, note: r.note,
   amount: Number(r.amount), proof: r.proof_path, duesPaymentId: r.dues_payment_id,
@@ -119,6 +131,27 @@ export const supabaseRepo = {
     // URL sementara (1 jam) untuk melihat bukti, karena bucket tidak publik.
     async url(path) {
       return check(await sb().storage.from('bukti').createSignedUrl(path, 3600)).signedUrl
+    },
+  },
+
+  receipts: {
+    // Unggah foto nota lalu minta Edge Function `scan-nota` membacanya.
+    // Setelah upload berhasil fungsi ini TIDAK melempar error, supaya bukti tetap bisa dipakai
+    // untuk input manual: kegagalan scan dikembalikan sebagai `error` (kode, lihat lib/errors.js).
+    async scan(file) {
+      const proof = await supabaseRepo.proofs.upload(file)
+      try {
+        const { data, error } = await sb().functions.invoke('scan-nota', { body: { proof_path: proof }, timeout: SCAN_TIMEOUT_MS })
+        if (error) return { proof, scanId: null, result: null, error: await scanErrorCode(error) }
+        if (!data?.ok) return { proof, scanId: data?.scan_id ?? null, result: null, error: data?.code ?? 'ai_error' }
+        return { proof, scanId: data.scan_id, result: data.data, error: null }
+      } catch (e) {
+        return { proof, scanId: null, result: null, error: /abort|timeout/i.test(String(e?.name || e?.message)) ? 'timeout' : 'network' }
+      }
+    },
+    // Tautkan hasil scan ke transaksi yang akhirnya disimpan (untuk mengukur akurasi scan).
+    async link(scanId, transactionId) {
+      check(await sb().from('receipt_scans').update({ transaction_id: transactionId }).eq('id', scanId))
     },
   },
 

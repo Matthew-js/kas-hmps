@@ -8,7 +8,7 @@ import { useAuth } from '@/stores/auth'
 import { formatRupiah, formatDate } from '@/utils/format'
 
 const PER_PAGE = 8
-const { sorted, allCategories, proofUrl, removeTransaction } = useKas()
+const { sorted, allCategories, proofUrl, removeTransaction, scanReceipt } = useKas()
 const { isBendahara } = useAuth()
 
 async function openProof(path) {
@@ -31,7 +31,32 @@ const deleting = ref(null)
 const deleteError = ref('')
 const busy = ref(false)
 
-const openForm = (t = null) => { editing.value = t; showForm.value = true }
+const scan = ref(null) // { proof, scanId, result, error } hasil Scan Nota untuk mengisi form
+const scanning = ref(false)
+const scanError = ref('')
+const scanInput = ref(null)
+
+const openForm = (t = null) => { editing.value = t; scan.value = null; showForm.value = true }
+
+// Scan Nota: kompres → unggah → baca → buka form terisi. Tidak pernah menyimpan transaksi.
+async function onScanFile(e) {
+  const file = e.target.files[0]
+  e.target.value = '' // agar foto yang sama bisa dipilih lagi
+  if (!file) return
+  scanning.value = true
+  scanError.value = ''
+  try {
+    const res = await scanReceipt(file)
+    editing.value = null
+    scan.value = res
+    showForm.value = true
+  } catch (err) {
+    // Gagal sebelum/saat unggah (foto rusak, >2MB, jaringan): belum ada bukti, isi manual dari awal.
+    scanError.value = `${err.message} Silakan coba lagi atau catat transaksi secara manual.`
+  } finally {
+    scanning.value = false
+  }
+}
 const askDelete = (t) => { deleting.value = t; deleteError.value = '' }
 async function confirmDelete() {
   busy.value = true
@@ -69,8 +94,17 @@ const amountText = (t) => `${t.type === 'in' ? '+' : '−'} ${formatRupiah(t.amo
         <h1 class="page-title">Transaksi</h1>
         <p class="page-sub">Catatan pemasukan &amp; pengeluaran kas</p>
       </div>
-      <button v-if="isBendahara" class="btn-sm btn-sm--gold btn-sm--lg only-desktop" @click="openForm()">+ Catat transaksi</button>
+      <span v-if="isBendahara" class="actions only-desktop">
+        <button class="btn-sm btn-sm--lg" :disabled="scanning" @click="scanInput.click()">{{ scanning ? 'Membaca nota…' : 'Scan nota' }}</button>
+        <button class="btn-sm btn-sm--gold btn-sm--lg" @click="openForm()">+ Catat transaksi</button>
+      </span>
+      <button v-if="isBendahara" class="btn-sm btn-sm--block only-mobile scan-mobile" :disabled="scanning" @click="scanInput.click()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10" /></svg>
+        {{ scanning ? 'Membaca nota…' : 'Scan nota' }}
+      </button>
+      <input v-if="isBendahara" ref="scanInput" type="file" accept="image/jpeg,image/png" capture="environment" hidden @change="onScanFile" />
     </header>
+    <p v-if="scanError" class="f__err" role="alert" style="margin-top: 12px">{{ scanError }}</p>
 
     <div class="toolbar">
       <input v-model="query" class="input-sm" type="search" placeholder="Cari transaksi..." aria-label="Cari transaksi" />
@@ -144,7 +178,17 @@ const amountText = (t) => `${t.type === 'in' ? '+' : '−'} ${formatRupiah(t.amo
     </template>
 
     <button v-if="isBendahara" class="fab only-mobile" aria-label="Catat transaksi" @click="openForm()">+</button>
-    <TransactionFormModal :open="showForm" :transaction="editing" @close="showForm = false" />
+    <TransactionFormModal :open="showForm" :transaction="editing" :scan="scan" @close="showForm = false; scan = null" />
+
+    <Teleport to="body">
+      <div v-if="scanning" class="scan-overlay" role="status" aria-live="polite">
+        <div class="scan-overlay__box">
+          <span class="spinner" aria-hidden="true"></span>
+          <strong>Membaca nota…</strong>
+          <small>Biasanya 5–15 detik, maksimal 30 detik.</small>
+        </div>
+      </div>
+    </Teleport>
 
     <ConfirmModal :open="!!deleting" title="Hapus transaksi?" :busy="busy" :error="deleteError" @confirm="confirmDelete" @close="deleting = null">
       <p>
@@ -165,6 +209,13 @@ const amountText = (t) => `${t.type === 'in' ? '+' : '−'} ${formatRupiah(t.amo
 .toolbar .range .input-sm { width: 130px; }
 .range__sep { font-size: 11px; color: var(--color-muted); }
 .range__clear { width: 30px; height: 30px; padding: 0; }
+.scan-mobile { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.scan-overlay { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: rgb(28 30 44 / 0.55); }
+.scan-overlay__box { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 22px 28px; text-align: center; background: var(--color-surface); border-radius: 14px; }
+.scan-overlay__box strong { font-size: 14px; }
+.scan-overlay__box small { font-size: 11px; color: var(--color-muted); }
+.spinner { width: 28px; height: 28px; border: 3px solid var(--color-border); border-top-color: var(--color-gold); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .card-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 @media (max-width: 768px) {
   .toolbar { flex-wrap: wrap; }

@@ -3,6 +3,7 @@ import { reactive, computed } from 'vue'
 import { repo } from '@/repositories'
 import { friendlyError } from '@/lib/errors'
 import { todayISO } from '@/utils/format'
+import { compressImage } from '@/utils/image'
 
 const state = reactive({
   ready: false,       // data awal sudah dimuat
@@ -117,16 +118,31 @@ export function useKas() {
     totalIn, totalOut, closingBalance, periodTransactions, isPaid, activeMembers, arrears, monthlySeries,
     load: loadKas,
 
-    addTransaction: (t, file) => run(async () => {
-      const proof = file ? await repo.proofs.upload(file) : null
+    // opts.proofPath = bukti yang sudah diunggah sebelumnya (hasil Scan Nota);
+    // opts.scanId = id receipt_scans yang ditautkan setelah transaksi tersimpan.
+    addTransaction: (t, file, { proofPath = null, scanId = null } = {}) => run(async () => {
+      const uploaded = file ? await repo.proofs.upload(file) : null
+      const proof = uploaded ?? proofPath
+      let row
       try {
-        const row = await repo.transactions.create({ ...t, proof })
+        row = await repo.transactions.create({ ...t, proof })
         state.transactions.push(row)
       } catch (e) {
-        if (proof) await repo.proofs.remove(proof).catch(() => {}) // jangan tinggalkan file yatim
+        await dropProof(uploaded) // jangan tinggalkan file yatim
         throw e
       }
+      if (uploaded && proofPath) await dropProof(proofPath) // foto scan diganti berkas lain
+      // Penautan scan hanya untuk statistik akurasi; kegagalannya tidak membatalkan transaksi.
+      if (scanId) await repo.receipts.link(scanId, row.id).catch(() => {})
+      return row
     }),
+    // Kompres → unggah → baca nota. Tidak pernah menyimpan transaksi.
+    // Hasil: { proof, scanId, result, error } — error berupa kode (lib/errors.js → scanErrorMessage).
+    scanReceipt: (file) => run(async () => repo.receipts.scan(await compressImage(file))),
+    discardProof: (path) => dropProof(path),
+    // Transaksi lain dengan nominal & tanggal sama (peringatan duplikat sebelum Simpan).
+    findDuplicates: (amount, date, exceptId = null) =>
+      state.transactions.filter((t) => t.amount === amount && t.date === date && t.id !== exceptId),
     // opts.file = bukti baru (mengganti yang lama); opts.removeProof = hapus bukti tanpa pengganti.
     // Berkas lama baru dihapus dari Storage setelah update di database berhasil.
     updateTransaction: (id, t, { file = null, removeProof = false } = {}) => run(async () => {

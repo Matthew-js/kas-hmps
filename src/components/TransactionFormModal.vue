@@ -2,20 +2,24 @@
 import { reactive, ref, computed, watch } from 'vue'
 import AppModal from './AppModal.vue'
 import { useKas } from '@/stores/kas'
-import { formatRupiah } from '@/utils/format'
+import { formatRupiah, todayISO as today } from '@/utils/format'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close', 'saved'])
 const { categories, addTransaction } = useKas()
 
-const blank = () => ({ type: 'in', category: '', amount: '', note: '', proof: null })
+const blank = () => ({ type: 'in', category: '', amount: '', date: today(), note: '', proof: null })
 const form = reactive(blank())
-const errors = reactive({ category: '', amount: '', note: '', proof: '' })
+const errors = reactive({ category: '', amount: '', date: '', note: '', proof: '' })
+const proofFile = ref(null) // objek File asli, diunggah saat Simpan
+const saving = ref(false)
+const saveError = ref('')
 const proofSize = ref(0)
 const dragging = ref(false)
 const fileInput = ref(null)
 
-const categoryOptions = computed(() => categories[form.type])
+// 'Iuran anggota' dicatat otomatis dari menu Iuran, jadi tidak ditawarkan di form manual.
+const categoryOptions = computed(() => categories[form.type].filter((c) => c !== 'Iuran anggota'))
 const amountPreview = computed(() => (Number(form.amount) > 0 ? formatRupiah(Number(form.amount)) : ''))
 const proofSizeText = computed(() =>
   proofSize.value < 1024 * 1024
@@ -26,8 +30,10 @@ const proofSizeText = computed(() =>
 watch(() => props.open, (open) => {
   if (!open) return
   Object.assign(form, blank())
-  Object.assign(errors, { category: '', amount: '', note: '', proof: '' })
+  Object.assign(errors, { category: '', amount: '', date: '', note: '', proof: '' })
   proofSize.value = 0
+  proofFile.value = null
+  saveError.value = ''
 })
 watch(() => form.type, () => { form.category = '' })
 
@@ -37,24 +43,37 @@ function pickFile(file) {
   if (!file) return
   if (!['image/jpeg', 'image/png', 'application/pdf'].includes(file.type)) errors.proof = 'Format harus JPG, PNG, atau PDF.'
   else if (file.size > 2 * 1024 * 1024) errors.proof = 'Ukuran file maksimal 2MB.'
-  else { form.proof = file.name; proofSize.value = file.size }
+  else { form.proof = file.name; proofSize.value = file.size; proofFile.value = file }
 }
 
 function clearFile() {
   form.proof = null
+  proofFile.value = null
   proofSize.value = 0
   errors.proof = ''
   if (fileInput.value) fileInput.value.value = ''
 }
 
-function submit() {
+async function submit() {
   errors.category = form.category ? '' : 'Pilih kategori.'
-  errors.amount = Number(form.amount) > 0 ? '' : 'Nominal harus lebih dari 0.'
+  errors.amount = Number.isInteger(Number(form.amount)) && Number(form.amount) > 0 ? '' : 'Nominal harus bilangan bulat lebih dari 0.'
+  errors.date = form.date && form.date <= today() ? '' : 'Tanggal wajib diisi dan tidak boleh di masa depan.'
   errors.note = form.note.trim() ? '' : 'Keterangan wajib diisi.'
-  if (errors.category || errors.amount || errors.note || errors.proof) return
-  addTransaction({ type: form.type, category: form.category, amount: Number(form.amount), note: form.note.trim(), proof: form.proof })
-  emit('saved')
-  emit('close')
+  if (errors.category || errors.amount || errors.date || errors.note || errors.proof) return
+  saving.value = true
+  saveError.value = ''
+  try {
+    await addTransaction(
+      { type: form.type, category: form.category, amount: Number(form.amount), date: form.date, note: form.note.trim() },
+      proofFile.value,
+    )
+    emit('saved')
+    emit('close')
+  } catch (e) {
+    saveError.value = e.message
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 
@@ -97,6 +116,13 @@ function submit() {
         <p v-if="errors.category" class="err">{{ errors.category }}</p>
       </div>
 
+      <!-- Tanggal -->
+      <div class="block">
+        <label for="tx-date" class="lbl">Tanggal</label>
+        <input id="tx-date" v-model="form.date" class="field" type="date" :max="today()" />
+        <p v-if="errors.date" class="err">{{ errors.date }}</p>
+      </div>
+
       <!-- Keterangan -->
       <div class="block">
         <label for="tx-note" class="lbl">Keterangan</label>
@@ -128,8 +154,9 @@ function submit() {
         <p v-if="errors.proof" class="err">{{ errors.proof }}</p>
       </div>
 
+      <p v-if="saveError" class="err" role="alert">{{ saveError }}</p>
       <div class="actions-row">
-        <button type="submit" class="btn-save">Simpan</button>
+        <button type="submit" class="btn-save" :disabled="saving">{{ saving ? 'Menyimpan…' : 'Simpan' }}</button>
         <button type="button" class="btn-cancel" @click="emit('close')">Batal</button>
       </div>
     </form>

@@ -3,7 +3,7 @@ import { computed } from 'vue'
 
 // data: [{ label, income, expense }]
 const props = defineProps({ data: { type: Array, required: true } })
-const max = computed(() => Math.max(...props.data.flatMap((d) => [d.income, d.expense])))
+const max = computed(() => Math.max(1, ...props.data.flatMap((d) => [d.income, d.expense])))
 const pct = (v) => `${(v / max.value) * 100}%`
 </script>
 

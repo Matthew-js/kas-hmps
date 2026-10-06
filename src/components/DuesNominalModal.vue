@@ -5,16 +5,25 @@ import { useKas } from '@/stores/kas'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
-const { state, setDuesAmount } = useKas()
+const { currentPeriod, setDuesAmount } = useKas()
 
 const amount = ref('')
 const error = ref('')
-watch(() => props.open, (open) => { if (open) { amount.value = String(state.duesAmount); error.value = '' } })
+const saving = ref(false)
+watch(() => props.open, (open) => { if (open) { amount.value = String(currentPeriod.value?.duesAmount ?? ''); error.value = '' } })
 
-function submit() {
-  if (!(Number(amount.value) > 0)) { error.value = 'Nominal harus lebih dari 0.'; return }
-  setDuesAmount(Number(amount.value))
-  emit('close')
+async function submit() {
+  const n = Number(amount.value)
+  if (!(Number.isInteger(n) && n > 0)) { error.value = 'Nominal harus bilangan bulat lebih dari 0.'; return }
+  saving.value = true
+  try {
+    await setDuesAmount(n)
+    emit('close')
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 
@@ -23,7 +32,7 @@ function submit() {
     <form novalidate @submit.prevent="submit">
       <div class="f">
         <label for="due-period">Periode</label>
-        <select id="due-period"><option>{{ state.period }}</option></select>
+        <input id="due-period" :value="currentPeriod?.name" disabled />
       </div>
       <div class="f">
         <label for="due-amount">Nominal per anggota (Rp)</label>
@@ -31,7 +40,7 @@ function submit() {
         <p v-if="error" class="f__err">{{ error }}</p>
       </div>
       <div class="modal-actions">
-        <button type="submit" class="btn-sm btn-sm--gold btn-sm--lg">Simpan</button>
+        <button type="submit" class="btn-sm btn-sm--gold btn-sm--lg" :disabled="saving">{{ saving ? 'Menyimpan…' : 'Simpan' }}</button>
         <button type="button" class="btn-sm btn-sm--lg" @click="emit('close')">Batal</button>
       </div>
     </form>

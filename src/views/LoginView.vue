@@ -4,11 +4,16 @@ import { useRouter } from 'vue-router'
 import BrandSeal from '@/components/BrandSeal.vue'
 import BaseInput from '@/components/BaseInput.vue'
 import BaseButton from '@/components/BaseButton.vue'
+import { useAuth } from '@/stores/auth'
+import { DATA_SOURCE } from '@/repositories'
 
 const form = reactive({ email: '', password: '' })
 const errors = reactive({ email: '', password: '' })
 const loading = ref(false)
+const loginError = ref('')
 const router = useRouter()
+const { login: signIn } = useAuth()
+const isDemo = DATA_SOURCE === 'memory'
 
 function validate() {
   errors.email = /^\S+@\S+\.\S+$/.test(form.email) ? '' : 'Masukkan email yang valid.'
@@ -16,14 +21,16 @@ function validate() {
   return !errors.email && !errors.password
 }
 
-// role: 'bendahara' | 'pengurus'
-async function login(role) {
+// roleHint hanya dipakai di mode demo (memori). Di Supabase peran diambil dari tabel profiles.
+async function login(roleHint = 'bendahara') {
   if (!validate()) return
   loading.value = true
+  loginError.value = ''
   try {
-    // TODO: sambungkan ke Supabase Auth, lalu arahkan sesuai peran
-    console.log('login', role, form.email)
+    await signIn(form.email, form.password, roleHint)
     router.push({ name: 'dashboard' })
+  } catch (e) {
+    loginError.value = e.message
   } finally {
     loading.value = false
   }
@@ -51,11 +58,16 @@ async function login(role) {
         />
       </div>
 
+      <p v-if="loginError" class="card__error" role="alert">{{ loginError }}</p>
+
       <div class="card__actions">
-        <BaseButton type="submit" :loading="loading">Masuk sebagai Bendahara</BaseButton>
-        <BaseButton variant="secondary" :loading="loading" @click="login('pengurus')">
-          Masuk sebagai Pengurus
-        </BaseButton>
+        <template v-if="isDemo">
+          <BaseButton type="submit" :loading="loading">Masuk sebagai Bendahara (demo)</BaseButton>
+          <BaseButton variant="secondary" :loading="loading" @click="login('pengurus')">
+            Masuk sebagai Pengurus (demo)
+          </BaseButton>
+        </template>
+        <BaseButton v-else type="submit" :loading="loading">Masuk</BaseButton>
       </div>
     </form>
   </main>
@@ -85,6 +97,7 @@ async function login(role) {
 .card__fields { gap: 14px; }
 .card__actions { gap: 10px; margin-top: 18px; }
 
+.card__error { width: 100%; margin: 14px 0 0; padding: 8px 10px; font-size: 11px; color: var(--color-danger); background: #fbeceb; border-radius: 8px; }
 .only-mobile { display: none; }
 
 @media (max-width: 640px) {

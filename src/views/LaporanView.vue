@@ -4,15 +4,21 @@ import StatCard from '@/components/StatCard.vue'
 import { useKas } from '@/stores/kas'
 import { formatRupiah, formatNumber, formatDate } from '@/utils/format'
 
-const { state, ledger, totalIn, closingBalance } = useKas()
+const { currentPeriod, openingBalance, ledger, totalIn, totalOut, closingBalance } = useKas()
+
+// Nilai CSV di-escape: tanda kutip digandakan dan selalu diapit kutip (aman untuk koma/kutip di keterangan).
+const csv = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
 
 function exportExcel() {
-  const lines = [['Tanggal', 'Uraian', 'Masuk', 'Keluar', 'Saldo']]
+  const lines = [['Tanggal', 'Kategori', 'Uraian', 'Masuk', 'Keluar', 'Saldo']]
+  lines.push(['', '', 'Saldo awal', '', '', openingBalance.value])
   ;[...ledger.value].reverse().forEach((t) =>
-    lines.push([t.date, `"${t.note}"`, t.type === 'in' ? t.amount : '', t.type === 'out' ? t.amount : '', t.balance]),
+    lines.push([t.date, t.category, t.note, t.type === 'in' ? t.amount : '', t.type === 'out' ? t.amount : '', t.balance]),
   )
-  const blob = new Blob(['\ufeff' + lines.map((l) => l.join(',')).join('\n')], { type: 'text/csv;charset=utf-8' })
-  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'laporan-kas.csv' })
+  lines.push(['', '', 'Total', totalIn.value, totalOut.value, closingBalance.value])
+  const blob = new Blob(['\ufeff' + lines.map((l) => l.map(csv).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' })
+  const name = `laporan-kas-${(currentPeriod.value?.name ?? 'periode').toLowerCase().replace(/\s+/g, '-')}.csv`
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name })
   a.click()
   URL.revokeObjectURL(a.href)
 }
@@ -25,7 +31,7 @@ const signedNumber = (t) => `${t.type === 'in' ? '+' : '-'}${formatNumber(t.amou
     <header class="page-head">
       <div>
         <h1 class="page-title">Laporan Keuangan</h1>
-        <p class="page-sub">Rekap periode {{ state.period }}</p>
+        <p class="page-sub">Rekap periode {{ currentPeriod?.name ?? '-' }}</p>
       </div>
       <div class="actions export">
         <button class="btn-sm" @click="exportPdf">Export PDF</button>
@@ -34,8 +40,9 @@ const signedNumber = (t) => `${t.type === 'in' ? '+' : '-'}${formatNumber(t.amou
     </header>
 
     <section class="stats">
-      <StatCard label="Saldo awal" :value="formatRupiah(state.openingBalance)" />
+      <StatCard label="Saldo awal" :value="formatRupiah(openingBalance)" />
       <StatCard label="Total pemasukan" :value="formatRupiah(totalIn)" tone="income" />
+      <StatCard label="Total pengeluaran" :value="formatRupiah(totalOut)" tone="expense" />
       <StatCard label="Saldo akhir" :value="formatRupiah(closingBalance)" />
     </section>
 
@@ -69,7 +76,7 @@ const signedNumber = (t) => `${t.type === 'in' ? '+' : '-'}${formatNumber(t.amou
 </template>
 
 <style scoped>
-.stats { margin-top: 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.stats { margin-top: 20px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 .ledger { margin-top: 16px; padding-top: 14px; }
 .ledger__title { margin: 0; font: 700 12px var(--font-display); }
 .rows { margin: 8px 0 0; padding: 0; list-style: none; }

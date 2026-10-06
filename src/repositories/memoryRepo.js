@@ -1,0 +1,120 @@
+// Implementasi repository di memori (data contoh). Dipakai untuk demo offline & unit test.
+// Perilakunya meniru aturan database: NRP unik, bayar iuran → transaksi pemasukan, dst.
+import { todayISO as today } from '@/utils/format'
+
+let seq = 100
+const clone = (x) => JSON.parse(JSON.stringify(x))
+const fail = (message) => { throw new Error(message) }
+
+const db = {
+  categories: [
+    { name: 'Iuran anggota', type: 'in' }, { name: 'Iuran mingguan', type: 'in' },
+    { name: 'Sponsorship', type: 'in' }, { name: 'Lainnya', type: 'in' },
+    { name: 'Konsumsi', type: 'out' }, { name: 'ATK', type: 'out' }, { name: 'Lainnya', type: 'out' },
+  ],
+  periods: [{ id: 1, name: 'Agustus 2026', startDate: '2026-08-01', endDate: '2026-08-31', openingBalance: 3000000, duesAmount: 20000 }],
+  members: [
+    { id: 1, name: 'Ahmad Fadillah', nrp: '5025221001', year: '2022', active: true },
+    { id: 2, name: 'Siti Nurhaliza', nrp: '5025221014', year: '2022', active: true },
+    { id: 3, name: 'Budi Santoso', nrp: '5025231027', year: '2023', active: true },
+    { id: 4, name: 'Rina Wijaya', nrp: '5025231033', year: '2023', active: true },
+    { id: 5, name: 'Dimas Pratama', nrp: '5025241009', year: '2024', active: false },
+    { id: 6, name: 'Putri Ayu', nrp: '5025241022', year: '2024', active: true },
+  ],
+  transactions: [
+    { id: 1, date: '2026-08-05', type: 'out', category: 'Konsumsi', note: 'Konsumsi acara', amount: 490000 },
+    { id: 2, date: '2026-08-10', type: 'in', category: 'Iuran mingguan', note: 'Iuran periode Agustus (batch)', amount: 700000 },
+    { id: 3, date: '2026-08-18', type: 'out', category: 'ATK', note: 'Kertas & spidol rapat', amount: 45000 },
+    { id: 4, date: '2026-08-22', type: 'in', category: 'Sponsorship', note: 'Dana sponsor lomba coding', amount: 1000000 },
+    { id: 5, date: '2026-08-26', type: 'out', category: 'Konsumsi', note: 'Snack rapat mingguan', amount: 85000 },
+    { id: 6, date: '2026-08-28', type: 'in', category: 'Iuran mingguan', note: 'Iuran kas minggu ke-8', amount: 150000 },
+  ],
+  duesPayments: [], // { id, memberId, periodId, amount }
+}
+
+// Demo: tambahkan periode bulan berjalan agar pembayaran iuran hari ini terlihat di laporan.
+{
+  const t = today()
+  const [y, m] = t.split('-').map(Number)
+  const BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
+  const name = `${BULAN[m - 1]} ${y}`
+  if (!db.periods.some((p) => p.name === name)) {
+    const last = new Date(y, m, 0).getDate()
+    db.periods.unshift({ id: 2, name, startDate: `${t.slice(0, 7)}-01`, endDate: `${t.slice(0, 7)}-${last}`, openingBalance: 4230000, duesAmount: 20000 })
+  }
+}
+
+let user = null
+
+export const memoryRepo = {
+  auth: {
+    async getUser() { return user },
+    // Mode memori: tidak ada kata sandi sungguhan; peran dipilih dari tombol login.
+    async signIn(email, _password, roleHint = 'bendahara') { user = { id: 'local', email, roleHint }; return user },
+    async signOut() { user = null },
+    onChange() {},
+    async getProfile() { return { id: 'local', full_name: user?.email, role: user?.roleHint ?? 'bendahara' } },
+  },
+
+  categories: { async list() { return clone(db.categories) } },
+
+  periods: {
+    async list() { return clone(db.periods) },
+    async setDuesAmount(id, amount) {
+      const p = db.periods.find((x) => x.id === id) ?? fail('Periode tidak ditemukan.')
+      p.duesAmount = amount
+      return clone(p)
+    },
+  },
+
+  members: {
+    async list() { return clone(db.members).sort((a, b) => a.name.localeCompare(b.name)) },
+    async save(m) {
+      if (db.members.some((x) => x.nrp === m.nrp && x.id !== m.id)) fail('NRP sudah terdaftar.')
+      if (m.id) { Object.assign(db.members.find((x) => x.id === m.id), m); return clone(m) }
+      const row = { ...m, id: ++seq }
+      db.members.push(row)
+      return clone(row)
+    },
+    async remove(id) {
+      if (db.duesPayments.some((d) => d.memberId === id)) {
+        fail('Anggota memiliki riwayat iuran sehingga tidak bisa dihapus. Ubah statusnya menjadi Nonaktif.')
+      }
+      db.members = db.members.filter((m) => m.id !== id)
+    },
+  },
+
+  transactions: {
+    async list() { return clone(db.transactions).sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id) },
+    async create(t) {
+      const row = { id: ++seq, date: today(), ...t }
+      db.transactions.push(row)
+      return clone(row)
+    },
+  },
+
+  proofs: {
+    async upload(file) { return `lokal/${file.name}` }, // tidak benar-benar diunggah
+    async remove() {},
+    async url() { return null },
+  },
+
+  dues: {
+    async paidMemberIds(periodId) { return db.duesPayments.filter((d) => d.periodId === periodId).map((d) => d.memberId) },
+    async markPaid(memberId, periodId) {
+      const member = db.members.find((m) => m.id === memberId)
+      const period = db.periods.find((p) => p.id === periodId)
+      if (!member?.active) fail('Anggota nonaktif tidak dapat membayar iuran')
+      if (db.duesPayments.some((d) => d.memberId === memberId && d.periodId === periodId)) fail('Anggota ini sudah lunas pada periode tersebut.')
+      const pay = { id: ++seq, memberId, periodId, amount: period.duesAmount }
+      db.duesPayments.push(pay)
+      db.transactions.push({ id: ++seq, date: today(), type: 'in', category: 'Iuran anggota', note: `Iuran ${member.name} – ${period.name}`, amount: pay.amount, duesPaymentId: pay.id })
+    },
+    async unmarkPaid(memberId, periodId) {
+      const pay = db.duesPayments.find((d) => d.memberId === memberId && d.periodId === periodId)
+      if (!pay) return
+      db.duesPayments = db.duesPayments.filter((d) => d !== pay)
+      db.transactions = db.transactions.filter((t) => t.duesPaymentId !== pay.id)
+    },
+  },
+}

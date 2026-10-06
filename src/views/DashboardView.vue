@@ -1,35 +1,31 @@
 <script setup>
+import { computed } from 'vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import StatCard from '@/components/StatCard.vue'
 import BarChart from '@/components/BarChart.vue'
 import ArrearsList from '@/components/ArrearsList.vue'
+import { useKas } from '@/stores/kas'
+import { formatRupiah } from '@/utils/format'
 
-// TODO: ganti dengan data dari Supabase
-const chartData = [
-  { label: 'Mar', income: 3.2, expense: 2.1 },
-  { label: 'Apr', income: 4.2, expense: 1.6 },
-  { label: 'Mei', income: 2.7, expense: 2.9 },
-  { label: 'Jun', income: 4.8, expense: 2.4 },
-  { label: 'Jul', income: 3.7, expense: 1.8 },
-  { label: 'Agu', income: 5.0, expense: 1.7 },
-]
-const arrears = ['Budi Santoso', 'Dimas Pratama', 'Putri Ayu']
+const { currentPeriod, closingBalance, totalIn, totalOut, periodTransactions, arrears, monthlySeries } = useKas()
+const countOf = (type) => periodTransactions.value.filter((t) => t.type === type).length
+const arrearNames = computed(() => arrears.value.map((m) => m.name))
 </script>
 
 <template>
-  <DashboardLayout role="Bendahara">
+  <DashboardLayout>
     <header class="head">
       <h1 class="head__title">Dashboard</h1>
       <p class="head__sub">
-        <span class="only-desktop">Ringkasan kas per 30 Agustus 2026</span>
-        <span class="only-mobile">Ringkasan kas · 30 Agu 2026</span>
+        <span class="only-desktop">Ringkasan kas periode {{ currentPeriod?.name ?? '-' }}</span>
+        <span class="only-mobile">Ringkasan · {{ currentPeriod?.name ?? '-' }}</span>
       </p>
     </header>
 
     <section class="stats">
-      <StatCard label="Saldo saat ini" value="Rp 4.230.000" note="Terakhir diperbarui hari ini" tone="neutral" />
-      <StatCard label="Pemasukan bulan ini" value="Rp 1.850.000" note="12 transaksi" tone="income" />
-      <StatCard label="Pengeluaran bulan ini" value="Rp 620.000" note="5 transaksi" tone="expense" />
+      <StatCard label="Saldo akhir periode" :value="formatRupiah(closingBalance)" :note="`Saldo awal ${formatRupiah(currentPeriod?.openingBalance ?? 0)}`" tone="neutral" />
+      <StatCard label="Pemasukan periode ini" :value="formatRupiah(totalIn)" :note="`${countOf('in')} transaksi`" tone="income" />
+      <StatCard label="Pengeluaran periode ini" :value="formatRupiah(totalOut)" :note="`${countOf('out')} transaksi`" tone="expense" />
     </section>
 
     <section class="panels">
@@ -38,11 +34,11 @@ const arrears = ['Budi Santoso', 'Dimas Pratama', 'Putri Ayu']
           <span class="only-desktop">Pemasukan vs pengeluaran (6 bulan)</span>
           <span class="only-mobile">Pemasukan vs pengeluaran</span>
         </h2>
-        <BarChart :data="chartData" />
+        <BarChart :data="monthlySeries" />
       </article>
       <article class="panel">
         <h2 class="panel__title">Tunggakan iuran</h2>
-        <ArrearsList :members="arrears" />
+        <ArrearsList :members="arrearNames" />
       </article>
     </section>
   </DashboardLayout>

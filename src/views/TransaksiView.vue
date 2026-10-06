@@ -3,10 +3,22 @@ import { ref, computed, watch } from 'vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import TransactionFormModal from '@/components/TransactionFormModal.vue'
 import { useKas } from '@/stores/kas'
+import { useAuth } from '@/stores/auth'
 import { formatRupiah, formatDate } from '@/utils/format'
 
 const PER_PAGE = 8
-const { sorted, allCategories } = useKas()
+const { sorted, allCategories, proofUrl } = useKas()
+const { isBendahara } = useAuth()
+
+async function openProof(path) {
+  try {
+    const url = await proofUrl(path)
+    if (url) window.open(url, '_blank', 'noopener')
+    else alert('Mode demo: bukti tidak benar-benar diunggah.')
+  } catch (e) {
+    alert(e.message)
+  }
+}
 const query = ref('')
 const category = ref('')
 const page = ref(1)
@@ -32,7 +44,7 @@ const amountText = (t) => `${t.type === 'in' ? '+' : '−'} ${formatRupiah(t.amo
         <h1 class="page-title">Transaksi</h1>
         <p class="page-sub">Catatan pemasukan &amp; pengeluaran kas</p>
       </div>
-      <button class="btn-sm btn-sm--gold btn-sm--lg only-desktop" @click="showForm = true">+ Catat transaksi</button>
+      <button v-if="isBendahara" class="btn-sm btn-sm--gold btn-sm--lg only-desktop" @click="showForm = true">+ Catat transaksi</button>
     </header>
 
     <div class="toolbar">
@@ -53,7 +65,10 @@ const amountText = (t) => `${t.type === 'in' ? '+' : '−'} ${formatRupiah(t.amo
             <tr v-for="t in rows" :key="t.id">
               <td class="mono">{{ formatDate(t.date) }}</td>
               <td>{{ t.category }}</td>
-              <td>{{ t.note }}</td>
+              <td>
+                {{ t.note }}
+                <button v-if="t.proof" class="link" @click="openProof(t.proof)">bukti</button>
+              </td>
               <td class="num mono" :class="t.type">{{ amountText(t) }}</td>
             </tr>
           </tbody>
@@ -78,11 +93,12 @@ const amountText = (t) => `${t.type === 'in' ? '+' : '−'} ${formatRupiah(t.amo
       </div>
     </template>
 
-    <button class="fab only-mobile" aria-label="Catat transaksi" @click="showForm = true">+</button>
+    <button v-if="isBendahara" class="fab only-mobile" aria-label="Catat transaksi" @click="showForm = true">+</button>
     <TransactionFormModal :open="showForm" @close="showForm = false" />
   </DashboardLayout>
 </template>
 
 <style scoped>
+.link { margin-left: 6px; padding: 0; font: 600 10px var(--font-body); color: var(--color-gold-hover); background: none; border: 0; text-decoration: underline; cursor: pointer; }
 .fab { position: fixed; right: 20px; bottom: 76px; width: 44px; height: 44px; font-size: 24px; color: var(--color-ink); background: var(--color-gold); border: 0; border-radius: 50%; box-shadow: 0 4px 12px rgb(0 0 0 / 0.2); cursor: pointer; }
 </style>

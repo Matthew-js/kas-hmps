@@ -1,9 +1,23 @@
 <script setup>
-import { useRoute } from 'vue-router'
+import { onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { navItems } from './navItems'
+import { useAuth } from '@/stores/auth'
+import { useKas, resetKas } from '@/stores/kas'
 
-defineProps({ role: { type: String, default: 'Bendahara' } })
 const route = useRoute()
+const router = useRouter()
+const { roleLabel: role, logout } = useAuth()
+const { state, load } = useKas()
+
+// Muat data sekali setelah login; halaman lain memakai data yang sama.
+onMounted(() => { if (!state.ready && !state.loading) load() })
+
+async function signOut() {
+  await logout()
+  resetKas()
+  router.push({ name: 'login' })
+}
 const isActive = (item) => route.path === item.to
 const mobileItems = navItems.filter((i) => i.mobile !== false)
 </script>
@@ -28,16 +42,24 @@ const mobileItems = navItems.filter((i) => i.mobile !== false)
       <div class="sidebar__role">
         <span>MASUK SEBAGAI</span>
         <strong>{{ role }}</strong>
+        <button class="sidebar__logout" @click="signOut">Keluar</button>
       </div>
     </aside>
 
     <!-- Mobile top bar -->
     <header class="topbar">
       <span class="brand__name">Kas HMPS</span>
-      <RouterLink to="/anggota" class="topbar__avatar" aria-label="Manajemen anggota">{{ role[0] }}</RouterLink>
+      <button class="topbar__avatar" :aria-label="`Keluar (${role})`" :title="`${role} · ketuk untuk keluar`" @click="signOut">{{ role[0] }}</button>
     </header>
 
-    <main class="content"><slot /></main>
+    <main class="content">
+      <div v-if="state.error" class="alert" role="alert">
+        <span>{{ state.error }}</span>
+        <button class="btn-sm" @click="load()">Coba lagi</button>
+      </div>
+      <p v-if="!state.ready && state.loading" class="empty">Memuat data…</p>
+      <slot v-if="state.ready" />
+    </main>
 
     <!-- Mobile bottom nav -->
     <nav class="bottomnav" aria-label="Menu utama">
@@ -66,6 +88,9 @@ const mobileItems = navItems.filter((i) => i.mobile !== false)
 .nav__item--active { background: var(--color-navy-active); border-left-color: var(--color-gold); color: #fff; }
 .sidebar__role { margin: auto 16px 16px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; background: rgb(255 255 255 / 0.08); border-radius: 8px; font-size: 8px; color: rgb(255 255 255 / 0.7); }
 .sidebar__role strong { font-size: 11px; color: #fff; }
+.sidebar__logout { margin-top: 6px; padding: 5px 0; font: 600 10px var(--font-body); color: #fff; background: rgb(255 255 255 / 0.12); border: 0; border-radius: 6px; cursor: pointer; }
+.sidebar__logout:hover { background: rgb(255 255 255 / 0.2); }
+.alert { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; padding: 10px 14px; font-size: 12px; color: var(--color-danger); background: #fbeceb; border: 1px solid #efc9c5; border-radius: 10px; }
 
 .content { padding: 40px; min-width: 0; }
 .topbar, .bottomnav { display: none; }
@@ -74,7 +99,7 @@ const mobileItems = navItems.filter((i) => i.mobile !== false)
   .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
   .sidebar { display: none; }
   .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--color-navy); color: #fff; }
-  .topbar__avatar { text-decoration: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: rgb(255 255 255 / 0.85); color: var(--color-navy); font: 600 10px var(--font-body); }
+  .topbar__avatar { border: 0; cursor: pointer; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: rgb(255 255 255 / 0.85); color: var(--color-navy); font: 600 10px var(--font-body); }
   .content { padding: 16px; }
   .bottomnav { position: sticky; bottom: 0; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 8px 0 10px; background: var(--color-surface); border-top: 1px solid var(--color-border); }
   .bottomnav__item { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 9px; color: var(--color-muted); text-decoration: none; }

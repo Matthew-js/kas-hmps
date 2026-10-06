@@ -5,12 +5,19 @@ import { todayISO as today } from '@/utils/format'
 let seq = 100
 const clone = (x) => JSON.parse(JSON.stringify(x))
 const fail = (message) => { throw new Error(message) }
+const NOT_FOUND = 'Data tidak ditemukan atau Anda tidak memiliki izin.'
+const isLocked = (c) => c.name === 'Iuran anggota' && c.type === 'in'
+// Sama dengan trigger transactions_guard_dues di database.
+const guardDuesTx = (t) => {
+  if (t.duesPaymentId) fail('Transaksi ini dibuat otomatis dari iuran. Ubah atau batalkan lewat menu Iuran.')
+}
+const findCategory = (id) => db.categories.find((c) => c.id === id) ?? fail(NOT_FOUND)
 
 const db = {
   categories: [
-    { name: 'Iuran anggota', type: 'in' }, { name: 'Iuran mingguan', type: 'in' },
-    { name: 'Sponsorship', type: 'in' }, { name: 'Lainnya', type: 'in' },
-    { name: 'Konsumsi', type: 'out' }, { name: 'ATK', type: 'out' }, { name: 'Lainnya', type: 'out' },
+    { id: 1, name: 'Iuran anggota', type: 'in' }, { id: 2, name: 'Iuran mingguan', type: 'in' },
+    { id: 3, name: 'Sponsorship', type: 'in' }, { id: 4, name: 'Lainnya', type: 'in' },
+    { id: 5, name: 'Konsumsi', type: 'out' }, { id: 6, name: 'ATK', type: 'out' }, { id: 7, name: 'Lainnya', type: 'out' },
   ],
   periods: [{ id: 1, name: 'Agustus 2026', startDate: '2026-08-01', endDate: '2026-08-31', openingBalance: 3000000, duesAmount: 20000 }],
   members: [
@@ -56,14 +63,57 @@ export const memoryRepo = {
     async getProfile() { return { id: 'local', full_name: user?.email, role: user?.roleHint ?? 'bendahara' } },
   },
 
-  categories: { async list() { return clone(db.categories) } },
+  categories: {
+    async list() { return clone(db.categories) },
+    async create(c) {
+      if (db.categories.some((x) => x.name === c.name && x.type === c.type)) fail('Nama kategori sudah ada untuk jenis ini.')
+      const row = { id: ++seq, name: c.name, type: c.type }
+      db.categories.push(row)
+      return clone(row)
+    },
+    async rename(id, name) {
+      const c = findCategory(id)
+      if (isLocked(c)) fail('Kategori "Iuran anggota" dikunci karena dipakai otomatis oleh menu Iuran.')
+      if (db.categories.some((x) => x.id !== id && x.name === name && x.type === c.type)) fail('Nama kategori sudah ada untuk jenis ini.')
+      // Meniru FK on update cascade: transaksi ikut berganti nama kategori.
+      db.transactions.forEach((t) => { if (t.category === c.name && t.type === c.type) t.category = name })
+      c.name = name
+      return clone(c)
+    },
+    async remove(id) {
+      const c = findCategory(id)
+      if (isLocked(c)) fail('Kategori "Iuran anggota" dikunci karena dipakai otomatis oleh menu Iuran.')
+      if (db.transactions.some((t) => t.category === c.name && t.type === c.type)) fail('Kategori sudah dipakai transaksi sehingga tidak bisa dihapus.')
+      db.categories = db.categories.filter((x) => x !== c)
+    },
+  },
 
   periods: {
-    async list() { return clone(db.periods) },
+    async list() { return clone(db.periods).sort((a, b) => b.startDate.localeCompare(a.startDate)) },
     async setDuesAmount(id, amount) {
       const p = db.periods.find((x) => x.id === id) ?? fail('Periode tidak ditemukan.')
       p.duesAmount = amount
       return clone(p)
+    },
+    async save(p) {
+      if (db.periods.some((x) => x.id !== p.id && x.name === p.name)) fail('Nama periode sudah dipakai.')
+      // Meniru exclusion constraint periods_no_overlap (rentang inklusif).
+      if (db.periods.some((x) => x.id !== p.id && x.startDate <= p.endDate && p.startDate <= x.endDate)) {
+        fail('Rentang tanggal tumpang tindih dengan periode lain.')
+      }
+      if (p.id) {
+        const row = db.periods.find((x) => x.id === p.id) ?? fail(NOT_FOUND)
+        Object.assign(row, p)
+        return clone(row)
+      }
+      const row = { ...p, id: ++seq }
+      db.periods.push(row)
+      return clone(row)
+    },
+    async remove(id) {
+      if (!db.periods.some((x) => x.id === id)) fail(NOT_FOUND)
+      if (db.duesPayments.some((d) => d.periodId === id)) fail('Periode sudah memiliki pembayaran iuran sehingga tidak bisa dihapus.')
+      db.periods = db.periods.filter((x) => x.id !== id)
     },
   },
 
@@ -90,6 +140,17 @@ export const memoryRepo = {
       const row = { id: ++seq, date: today(), ...t }
       db.transactions.push(row)
       return clone(row)
+    },
+    async update(id, t) {
+      const row = db.transactions.find((x) => x.id === id) ?? fail(NOT_FOUND)
+      guardDuesTx(row)
+      Object.assign(row, t)
+      return clone(row)
+    },
+    async remove(id) {
+      const row = db.transactions.find((x) => x.id === id) ?? fail(NOT_FOUND)
+      guardDuesTx(row)
+      db.transactions = db.transactions.filter((x) => x !== row)
     },
   },
 

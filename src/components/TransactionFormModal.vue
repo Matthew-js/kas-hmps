@@ -4,9 +4,11 @@ import AppModal from './AppModal.vue'
 import { useKas } from '@/stores/kas'
 import { formatRupiah, todayISO as today } from '@/utils/format'
 
-const props = defineProps({ open: Boolean })
+// `transaction` diisi → mode edit; kosong → catat transaksi baru.
+const props = defineProps({ open: Boolean, transaction: { type: Object, default: null } })
 const emit = defineEmits(['close', 'saved'])
-const { categories, addTransaction } = useKas()
+const { categories, addTransaction, updateTransaction, proofUrl } = useKas()
+const isEdit = computed(() => !!props.transaction)
 
 const blank = () => ({ type: 'in', category: '', amount: '', date: today(), note: '', proof: null })
 const form = reactive(blank())
@@ -17,6 +19,7 @@ const saveError = ref('')
 const proofSize = ref(0)
 const dragging = ref(false)
 const fileInput = ref(null)
+const keptProof = ref(null) // path bukti lama di Storage (mode edit) selama tidak dihapus/diganti
 
 // 'Iuran anggota' dicatat otomatis dari menu Iuran, jadi tidak ditawarkan di form manual.
 const categoryOptions = computed(() => categories[form.type].filter((c) => c !== 'Iuran anggota'))
@@ -29,13 +32,16 @@ const proofSizeText = computed(() =>
 
 watch(() => props.open, (open) => {
   if (!open) return
-  Object.assign(form, blank())
+  const t = props.transaction
+  Object.assign(form, t ? { type: t.type, category: t.category, amount: String(t.amount), date: t.date, note: t.note, proof: null } : blank())
+  keptProof.value = t?.proof ?? null
   Object.assign(errors, { category: '', amount: '', date: '', note: '', proof: '' })
   proofSize.value = 0
   proofFile.value = null
   saveError.value = ''
 })
-watch(() => form.type, () => { form.category = '' })
+// Kosongkan kategori hanya jika tidak tersedia di jenis yang baru (agar mode edit tidak kehilangan kategorinya).
+watch(() => form.type, () => { if (!categoryOptions.value.includes(form.category)) form.category = '' })
 
 function pickFile(file) {
   errors.proof = ''
@@ -54,6 +60,16 @@ function clearFile() {
   if (fileInput.value) fileInput.value.value = ''
 }
 
+async function viewKeptProof() {
+  try {
+    const url = await proofUrl(keptProof.value)
+    if (url) window.open(url, '_blank', 'noopener')
+    else saveError.value = 'Mode demo: bukti tidak benar-benar diunggah.'
+  } catch (e) {
+    saveError.value = e.message
+  }
+}
+
 async function submit() {
   errors.category = form.category ? '' : 'Pilih kategori.'
   errors.amount = Number.isInteger(Number(form.amount)) && Number(form.amount) > 0 ? '' : 'Nominal harus bilangan bulat lebih dari 0.'
@@ -63,10 +79,12 @@ async function submit() {
   saving.value = true
   saveError.value = ''
   try {
-    await addTransaction(
-      { type: form.type, category: form.category, amount: Number(form.amount), date: form.date, note: form.note.trim() },
-      proofFile.value,
-    )
+    const data = { type: form.type, category: form.category, amount: Number(form.amount), date: form.date, note: form.note.trim() }
+    if (isEdit.value) {
+      await updateTransaction(props.transaction.id, data, { file: proofFile.value, removeProof: !keptProof.value })
+    } else {
+      await addTransaction(data, proofFile.value)
+    }
     emit('saved')
     emit('close')
   } catch (e) {
@@ -78,7 +96,7 @@ async function submit() {
 </script>
 
 <template>
-  <AppModal :open="open" title="Catat transaksi baru" width="440px" @close="emit('close')">
+  <AppModal :open="open" :title="isEdit ? 'Edit transaksi' : 'Catat transaksi baru'" width="440px" @close="emit('close')">
     <form class="tx" :class="`tx--${form.type}`" novalidate @submit.prevent="submit">
       <!-- Jenis transaksi -->
       <div class="seg" role="radiogroup" aria-label="Jenis transaksi">
@@ -133,12 +151,22 @@ async function submit() {
       <!-- Bukti transaksi -->
       <div class="block">
         <span class="lbl">Bukti transaksi <em>opsional</em></span>
-        <div v-if="form.proof" class="file">
+        <div v-if="keptProof && !form.proof" class="file file--kept">
           <span class="file__icon" aria-hidden="true">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg>
           </span>
-          <span class="file__info"><strong>{{ form.proof }}</strong><small>{{ proofSizeText }} · siap diunggah</small></span>
-          <button type="button" class="file__remove" aria-label="Hapus file" @click="clearFile">✕</button>
+          <span class="file__info">
+            <strong>{{ keptProof.split('/').pop() }}</strong>
+            <small>Bukti tersimpan · <button type="button" class="file__link" @click="viewKeptProof">lihat</button> · <label class="file__link">ganti<input type="file" accept=".jpg,.jpeg,.png,.pdf" hidden @change="pickFile($event.target.files[0])" /></label></small>
+          </span>
+          <button type="button" class="file__remove" aria-label="Hapus bukti" title="Hapus bukti" @click="keptProof = null">✕</button>
+        </div>
+        <div v-else-if="form.proof" class="file">
+          <span class="file__icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg>
+          </span>
+          <span class="file__info"><strong>{{ form.proof }}</strong><small>{{ proofSizeText }} · {{ isEdit && transaction?.proof ? 'menggantikan bukti lama' : 'siap diunggah' }}</small></span>
+          <button type="button" class="file__remove" aria-label="Batalkan file" @click="clearFile">✕</button>
         </div>
         <label
           v-else class="drop" :class="{ 'is-drag': dragging }"
@@ -152,6 +180,9 @@ async function submit() {
           <input ref="fileInput" type="file" accept=".jpg,.jpeg,.png,.pdf" hidden @change="pickFile($event.target.files[0])" />
         </label>
         <p v-if="errors.proof" class="err">{{ errors.proof }}</p>
+        <p v-if="isEdit && transaction?.proof && !keptProof && !form.proof" class="hint">
+          Bukti lama akan dihapus saat disimpan. <button type="button" class="file__link" @click="keptProof = transaction.proof">Urungkan</button>
+        </p>
       </div>
 
       <p v-if="saveError" class="err" role="alert">{{ saveError }}</p>
@@ -218,6 +249,9 @@ async function submit() {
 .file__info small { font: 400 10px var(--font-body); color: var(--color-muted); }
 .file__remove { flex: none; width: 24px; height: 24px; font-size: 11px; color: var(--color-muted); background: transparent; border: 0; border-radius: 50%; cursor: pointer; }
 .file__remove:hover { background: var(--color-page); }
+.file--kept { border-color: var(--color-border); }
+.file__link { padding: 0; font: 600 10px var(--font-body); color: var(--color-gold-hover); background: none; border: 0; text-decoration: underline; cursor: pointer; }
+.hint { margin: 0; font-size: 10px; color: var(--color-muted); }
 
 /* Aksi */
 .actions-row { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; margin-top: 4px; }

@@ -5,6 +5,7 @@ import AnggotaView from '@/views/AnggotaView.vue'
 import TransaksiView from '@/views/TransaksiView.vue'
 import IuranView from '@/views/IuranView.vue'
 import LaporanView from '@/views/LaporanView.vue'
+import PeriodeView from '@/views/PeriodeView.vue'
 import { useAuth } from '@/stores/auth'
 
 const router = createRouter({
@@ -16,6 +17,7 @@ const router = createRouter({
     { path: '/transaksi', name: 'transaksi', component: TransaksiView },
     { path: '/iuran', name: 'iuran', component: IuranView },
     { path: '/laporan', name: 'laporan', component: LaporanView },
+    { path: '/periode', name: 'periode', component: PeriodeView },
     { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
   ],
   scrollBehavior: () => ({ top: 0 }),

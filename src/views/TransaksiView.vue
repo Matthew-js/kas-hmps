@@ -2,12 +2,13 @@
 import { ref, computed, watch } from 'vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import TransactionFormModal from '@/components/TransactionFormModal.vue'
+import ConfirmModal from '@/components/ConfirmModal.vue'
 import { useKas } from '@/stores/kas'
 import { useAuth } from '@/stores/auth'
 import { formatRupiah, formatDate } from '@/utils/format'
 
 const PER_PAGE = 8
-const { sorted, allCategories, proofUrl } = useKas()
+const { sorted, allCategories, proofUrl, removeTransaction } = useKas()
 const { isBendahara } = useAuth()
 
 async function openProof(path) {
@@ -21,18 +22,42 @@ async function openProof(path) {
 }
 const query = ref('')
 const category = ref('')
+const dateFrom = ref('')
+const dateTo = ref('')
 const page = ref(1)
 const showForm = ref(false)
+const editing = ref(null)
+const deleting = ref(null)
+const deleteError = ref('')
+const busy = ref(false)
+
+const openForm = (t = null) => { editing.value = t; showForm.value = true }
+const askDelete = (t) => { deleting.value = t; deleteError.value = '' }
+async function confirmDelete() {
+  busy.value = true
+  deleteError.value = ''
+  try {
+    await removeTransaction(deleting.value.id)
+    deleting.value = null
+  } catch (e) {
+    deleteError.value = e.message
+  } finally {
+    busy.value = false
+  }
+}
+const resetDates = () => { dateFrom.value = ''; dateTo.value = '' }
 
 const filtered = computed(() =>
   sorted.value.filter((t) =>
     (!category.value || t.category === category.value) &&
+    (!dateFrom.value || t.date >= dateFrom.value) &&
+    (!dateTo.value || t.date <= dateTo.value) &&
     (!query.value || `${t.note} ${t.category}`.toLowerCase().includes(query.value.toLowerCase())),
   ),
 )
 const pages = computed(() => Math.max(1, Math.ceil(filtered.value.length / PER_PAGE)))
 const rows = computed(() => filtered.value.slice((page.value - 1) * PER_PAGE, page.value * PER_PAGE))
-watch([query, category], () => { page.value = 1 })
+watch([query, category, dateFrom, dateTo], () => { page.value = 1 })
 
 const amountText = (t) => `${t.type === 'in' ? '+' : '−'} ${formatRupiah(t.amount)}`
 </script>
@@ -44,7 +69,7 @@ const amountText = (t) => `${t.type === 'in' ? '+' : '−'} ${formatRupiah(t.amo
         <h1 class="page-title">Transaksi</h1>
         <p class="page-sub">Catatan pemasukan &amp; pengeluaran kas</p>
       </div>
-      <button v-if="isBendahara" class="btn-sm btn-sm--gold btn-sm--lg only-desktop" @click="showForm = true">+ Catat transaksi</button>
+      <button v-if="isBendahara" class="btn-sm btn-sm--gold btn-sm--lg only-desktop" @click="openForm()">+ Catat transaksi</button>
     </header>
 
     <div class="toolbar">
@@ -53,6 +78,12 @@ const amountText = (t) => `${t.type === 'in' ? '+' : '−'} ${formatRupiah(t.amo
         <option value="">Semua kategori</option>
         <option v-for="c in allCategories" :key="c" :value="c">{{ c }}</option>
       </select>
+      <div class="range" role="group" aria-label="Rentang tanggal">
+        <input v-model="dateFrom" class="input-sm" type="date" :max="dateTo || undefined" aria-label="Dari tanggal" />
+        <span class="range__sep">–</span>
+        <input v-model="dateTo" class="input-sm" type="date" :min="dateFrom || undefined" aria-label="Sampai tanggal" />
+        <button v-if="dateFrom || dateTo" class="btn-sm range__clear" aria-label="Hapus filter tanggal" @click="resetDates">✕</button>
+      </div>
     </div>
 
     <p v-if="!filtered.length" class="empty">Belum ada transaksi yang cocok.</p>
@@ -60,7 +91,7 @@ const amountText = (t) => `${t.type === 'in' ? '+' : '−'} ${formatRupiah(t.amo
     <template v-else>
       <div class="panel-white only-desktop">
         <table class="table">
-          <thead><tr><th>Tanggal</th><th>Kategori</th><th>Keterangan</th><th class="num">Nominal</th></tr></thead>
+          <thead><tr><th>Tanggal</th><th>Kategori</th><th>Keterangan</th><th class="num">Nominal</th><th v-if="isBendahara" class="num">Aksi</th></tr></thead>
           <tbody>
             <tr v-for="t in rows" :key="t.id">
               <td class="mono">{{ formatDate(t.date) }}</td>
@@ -70,6 +101,13 @@ const amountText = (t) => `${t.type === 'in' ? '+' : '−'} ${formatRupiah(t.amo
                 <button v-if="t.proof" class="link" @click="openProof(t.proof)">bukti</button>
               </td>
               <td class="num mono" :class="t.type">{{ amountText(t) }}</td>
+              <td v-if="isBendahara" class="num">
+                <RouterLink v-if="t.duesPaymentId" to="/iuran" class="auto" title="Ubah atau batalkan lewat menu Iuran">Otomatis dari iuran</RouterLink>
+                <span v-else class="actions" style="justify-content: flex-end">
+                  <button class="btn-sm" @click="openForm(t)">Edit</button>
+                  <button class="btn-sm" @click="askDelete(t)">Hapus</button>
+                </span>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -80,9 +118,21 @@ const amountText = (t) => `${t.type === 'in' ? '+' : '−'} ${formatRupiah(t.amo
           <div>
             <p class="card-item__title">{{ t.category }}</p>
             <p class="card-item__meta">{{ t.note }}</p>
-            <p class="card-item__meta">{{ formatDate(t.date) }}</p>
+            <p class="card-item__meta">
+              {{ formatDate(t.date) }}
+              <button v-if="t.proof" class="link" @click="openProof(t.proof)">bukti</button>
+            </p>
           </div>
-          <span class="mono" :class="t.type" style="font-size: 12px">{{ amountText(t) }}</span>
+          <div class="card-side">
+            <span class="mono" :class="t.type" style="font-size: 12px">{{ amountText(t) }}</span>
+            <template v-if="isBendahara">
+              <RouterLink v-if="t.duesPaymentId" to="/iuran" class="auto">Otomatis dari iuran</RouterLink>
+              <span v-else class="actions">
+                <button class="btn-sm" @click="openForm(t)">Edit</button>
+                <button class="btn-sm" @click="askDelete(t)">Hapus</button>
+              </span>
+            </template>
+          </div>
         </li>
       </ul>
 
@@ -93,12 +143,35 @@ const amountText = (t) => `${t.type === 'in' ? '+' : '−'} ${formatRupiah(t.amo
       </div>
     </template>
 
-    <button v-if="isBendahara" class="fab only-mobile" aria-label="Catat transaksi" @click="showForm = true">+</button>
-    <TransactionFormModal :open="showForm" @close="showForm = false" />
+    <button v-if="isBendahara" class="fab only-mobile" aria-label="Catat transaksi" @click="openForm()">+</button>
+    <TransactionFormModal :open="showForm" :transaction="editing" @close="showForm = false" />
+
+    <ConfirmModal :open="!!deleting" title="Hapus transaksi?" :busy="busy" :error="deleteError" @confirm="confirmDelete" @close="deleting = null">
+      <p>
+        <strong>{{ deleting?.note }}</strong> ({{ deleting && amountText(deleting) }}, {{ deleting && formatDate(deleting.date) }}) akan dihapus dari buku kas.
+      </p>
+      <p v-if="deleting?.proof">Berkas bukti transaksinya juga ikut dihapus.</p>
+      <p class="muted">Aksi ini tidak dapat dibatalkan.</p>
+    </ConfirmModal>
   </DashboardLayout>
 </template>
 
 <style scoped>
 .link { margin-left: 6px; padding: 0; font: 600 10px var(--font-body); color: var(--color-gold-hover); background: none; border: 0; text-decoration: underline; cursor: pointer; }
 .fab { position: fixed; right: 20px; bottom: 76px; width: 44px; height: 44px; font-size: 24px; color: var(--color-ink); background: var(--color-gold); border: 0; border-radius: 50%; box-shadow: 0 4px 12px rgb(0 0 0 / 0.2); cursor: pointer; }
+.auto { display: inline-block; padding: 2px 8px; font: 600 9px var(--font-body); color: var(--color-muted); text-decoration: none; white-space: nowrap; background: var(--color-page); border: 1px solid var(--color-border); border-radius: 999px; }
+.auto:hover { color: var(--color-ink); border-color: var(--color-gold); }
+.range { display: flex; align-items: center; gap: 6px; }
+.toolbar .range .input-sm { width: 130px; }
+.range__sep { font-size: 11px; color: var(--color-muted); }
+.range__clear { width: 30px; height: 30px; padding: 0; }
+.card-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+@media (max-width: 768px) {
+  .toolbar { flex-wrap: wrap; }
+  .toolbar > .input-sm { flex: 1 1 140px; width: auto; min-width: 0; height: 36px; font-size: 13px; }
+  .range { flex: 1 1 100%; }
+  .toolbar .range .input-sm { flex: 1; width: auto; min-width: 0; height: 36px; font-size: 13px; }
+  .range__clear { width: 36px; height: 36px; flex: none; }
+  .card-item > div:first-child { min-width: 0; }
+}
 </style>

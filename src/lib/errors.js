@@ -4,6 +4,8 @@ const BY_CODE = {
   23503: 'Data masih dipakai oleh data lain sehingga tidak bisa dihapus.',
   23514: 'Data tidak memenuhi aturan validasi.',
   42501: 'Anda tidak memiliki izin untuk aksi ini.',
+  '23P01': 'Rentang tanggal tumpang tindih dengan periode lain.',
+  PGRST116: 'Data tidak ditemukan atau Anda tidak memiliki izin.',
 }
 
 export function friendlyError(e, overrides = {}) {

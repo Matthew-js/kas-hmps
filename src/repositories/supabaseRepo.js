@@ -6,6 +6,10 @@ import { todayISO } from '@/utils/format'
 const sb = () => getSupabase()
 const check = ({ data, error }, overrides) => { if (error) rethrow(error, overrides); return data }
 
+const DUP_CATEGORY = { 23505: 'Nama kategori sudah ada untuk jenis ini.' }
+// DELETE yang diblokir RLS tidak mengembalikan error, hanya 0 baris; jangan anggap berhasil.
+const mustAffect = (rows) => { if (!rows?.length) rethrow({ code: 'PGRST116' }) }
+
 const toTx = (r) => ({
   id: r.id, date: r.date, type: r.type, category: r.category, note: r.note,
   amount: Number(r.amount), proof: r.proof_path, duesPaymentId: r.dues_payment_id,
@@ -34,7 +38,19 @@ export const supabaseRepo = {
   },
 
   categories: {
-    async list() { return check(await sb().from('categories').select('name, type').order('id')) },
+    async list() { return check(await sb().from('categories').select('id, name, type').order('id')) },
+    async create(c) {
+      return check(await sb().from('categories').insert({ name: c.name, type: c.type }).select('id, name, type').single(), DUP_CATEGORY)
+    },
+    // Transaksi ikut berganti nama karena FK on update cascade.
+    async rename(id, name) {
+      return check(await sb().from('categories').update({ name }).eq('id', id).select('id, name, type').single(), DUP_CATEGORY)
+    },
+    async remove(id) {
+      mustAffect(check(await sb().from('categories').delete().eq('id', id).select('id'), {
+        23503: 'Kategori sudah dipakai transaksi sehingga tidak bisa dihapus.',
+      }))
+    },
   },
 
   periods: {
@@ -43,6 +59,19 @@ export const supabaseRepo = {
     },
     async setDuesAmount(id, amount) {
       return toPeriod(check(await sb().from('periods').update({ dues_amount: amount }).eq('id', id).select().single()))
+    },
+    async save(p) {
+      const row = {
+        name: p.name, start_date: p.startDate, end_date: p.endDate,
+        opening_balance: p.openingBalance, dues_amount: p.duesAmount,
+      }
+      const q = p.id ? sb().from('periods').update(row).eq('id', p.id) : sb().from('periods').insert(row)
+      return toPeriod(check(await q.select().single(), { 23505: 'Nama periode sudah dipakai.' }))
+    },
+    async remove(id) {
+      mustAffect(check(await sb().from('periods').delete().eq('id', id).select('id'), {
+        23503: 'Periode sudah memiliki pembayaran iuran sehingga tidak bisa dihapus.',
+      }))
     },
   },
 
@@ -67,6 +96,14 @@ export const supabaseRepo = {
     async create(t) {
       const row = { date: t.date, type: t.type, category: t.category, note: t.note, amount: t.amount, proof_path: t.proof ?? null }
       return toTx(check(await sb().from('transactions').insert(row).select().single()))
+    },
+    // Trigger transactions_guard_dues menolak perubahan transaksi otomatis dari iuran.
+    async update(id, t) {
+      const row = { date: t.date, type: t.type, category: t.category, note: t.note, amount: t.amount, proof_path: t.proof ?? null }
+      return toTx(check(await sb().from('transactions').update(row).eq('id', id).select().single()))
+    },
+    async remove(id) {
+      mustAffect(check(await sb().from('transactions').delete().eq('id', id).select('id')))
     },
   },
 

@@ -5,4 +5,5 @@ export const navItems = [
   { label: 'Transaksi', short: 'Transaksi', to: '/transaksi', ready: true },
   { label: 'Iuran Anggota', short: 'Iuran', to: '/iuran', ready: true },
   { label: 'Laporan', short: 'Laporan', to: '/laporan', ready: true },
+  { label: 'Periode & Kategori', short: 'Periode', to: '/periode', ready: true },
 ]

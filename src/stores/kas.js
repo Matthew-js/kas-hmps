@@ -14,7 +14,7 @@ const state = reactive({
   transactions: [],
   paidIds: [],        // anggota yang sudah lunas di periode terpilih
 })
-const categories = reactive({ in: [], out: [] })
+const categories = reactive({ in: [], out: [], rows: [] }) // rows: { id, name, type } untuk halaman Periode
 
 const signed = (t) => (t.type === 'in' ? t.amount : -t.amount)
 const byDateDesc = (a, b) => b.date.localeCompare(a.date) || b.id - a.id
@@ -61,6 +61,23 @@ const monthlySeries = computed(() => {
   })
 })
 
+function setCategories(rows) {
+  categories.rows = rows
+  categories.in = rows.filter((c) => c.type === 'in').map((c) => c.name)
+  categories.out = rows.filter((c) => c.type === 'out').map((c) => c.name)
+}
+const byStartDesc = (a, b) => b.startDate.localeCompare(a.startDate)
+
+// Saldo akhir sembarang periode: saldo awal + pemasukan − pengeluaran di rentang tanggalnya.
+function closingBalanceOf(p) {
+  return state.transactions
+    .filter((t) => t.date >= p.startDate && t.date <= p.endDate)
+    .reduce((s, t) => s + signed(t), p.openingBalance)
+}
+
+// Hapus berkas bukti tanpa menggagalkan aksi utama (data sudah tersimpan).
+const dropProof = (path) => (path ? repo.proofs.remove(path).catch(() => {}) : null)
+
 async function refreshTransactions() { state.transactions = await repo.transactions.list() }
 async function refreshPaid() { state.paidIds = state.periodId ? await repo.dues.paidMemberIds(state.periodId) : [] }
 
@@ -76,8 +93,7 @@ export async function loadKas() {
     const [cats, periods, members, transactions] = await Promise.all([
       repo.categories.list(), repo.periods.list(), repo.members.list(), repo.transactions.list(),
     ])
-    categories.in = cats.filter((c) => c.type === 'in').map((c) => c.name)
-    categories.out = cats.filter((c) => c.type === 'out').map((c) => c.name)
+    setCategories(cats)
     state.periods = periods
     state.members = members
     state.transactions = transactions
@@ -111,6 +127,29 @@ export function useKas() {
         throw e
       }
     }),
+    // opts.file = bukti baru (mengganti yang lama); opts.removeProof = hapus bukti tanpa pengganti.
+    // Berkas lama baru dihapus dari Storage setelah update di database berhasil.
+    updateTransaction: (id, t, { file = null, removeProof = false } = {}) => run(async () => {
+      const old = state.transactions.find((x) => x.id === id)
+      const uploaded = file ? await repo.proofs.upload(file) : null
+      const proof = uploaded ?? (removeProof ? null : old?.proof ?? null)
+      let row
+      try {
+        row = await repo.transactions.update(id, { ...t, proof })
+      } catch (e) {
+        await dropProof(uploaded)
+        throw e
+      }
+      const i = state.transactions.findIndex((x) => x.id === id)
+      if (i >= 0) state.transactions[i] = row
+      if (old?.proof && old.proof !== proof) await dropProof(old.proof)
+    }),
+    removeTransaction: (id) => run(async () => {
+      const old = state.transactions.find((x) => x.id === id)
+      await repo.transactions.remove(id)
+      state.transactions = state.transactions.filter((x) => x.id !== id)
+      await dropProof(old?.proof)
+    }),
     proofUrl: (path) => run(() => repo.proofs.url(path)),
 
     saveMember: (m) => run(async () => {
@@ -122,6 +161,33 @@ export function useKas() {
     removeMember: (id) => run(async () => {
       await repo.members.remove(id)
       state.members = state.members.filter((m) => m.id !== id)
+    }),
+
+    closingBalanceOf,
+    savePeriod: (p) => run(async () => {
+      const row = await repo.periods.save(p)
+      const i = state.periods.findIndex((x) => x.id === row.id)
+      if (i >= 0) state.periods[i] = row
+      else state.periods.push(row)
+      state.periods.sort(byStartDesc)
+      if (!state.periodId) { state.periodId = row.id; await refreshPaid() }
+    }),
+    removePeriod: (id) => run(async () => {
+      await repo.periods.remove(id)
+      state.periods = state.periods.filter((p) => p.id !== id)
+      if (state.periodId === id) { state.periodId = state.periods[0]?.id ?? null; await refreshPaid() }
+    }),
+
+    // Ganti nama kategori ikut mengubah transaksi (FK on update cascade), jadi transaksi dimuat ulang.
+    saveCategory: (c) => run(async () => {
+      if (c.id) await repo.categories.rename(c.id, c.name)
+      else await repo.categories.create(c)
+      const [rows] = await Promise.all([repo.categories.list(), c.id ? refreshTransactions() : null])
+      setCategories(rows)
+    }),
+    removeCategory: (id) => run(async () => {
+      await repo.categories.remove(id)
+      setCategories(categories.rows.filter((c) => c.id !== id))
     }),
 
     setPeriod: (id) => run(async () => { state.periodId = id; await refreshPaid() }),

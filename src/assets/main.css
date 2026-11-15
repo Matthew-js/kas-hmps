@@ -1,0 +1,103 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&family=IBM+Plex+Mono:wght@600&family=Public+Sans:wght@400;500;600&display=swap');
+
+/* Design tokens — diambil dari desain Figma 01-login */
+:root {
+  --color-page: #efeae0;
+  --color-surface: #ffffff;
+  --color-border: #e6dfd0;
+  --color-gold: #c99d3c;
+  --color-gold-hover: #b98f33;
+  --color-ink: #1c1a16;
+  --color-muted: #6f6a5f;
+  --color-danger: #b3402f;
+  --color-navy: #1f2a4a;
+  --color-navy-active: #38405a;
+  --color-income: #2f7d4f;
+  --color-expense: #b8403a;
+  --color-line: #ebe5d6;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --font-display: 'Fraunces', 'Georgia', serif;
+  --font-body: 'Public Sans', system-ui, sans-serif;
+
+  --radius-card: 16px;
+  --radius-control: 10px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #app { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible { outline: 2px solid var(--color-gold); outline-offset: 2px; }
+
+/* ===== Utilitas bersama halaman dashboard ===== */
+/* Komponen khusus mobile disembunyikan di desktop; komponen khusus desktop disembunyikan di mobile.
+   Tidak ada `display` yang di-set di mobile supaya elemen tetap memakai display aslinya (flex/block/inline). */
+@media (min-width: 769px) { .only-mobile { display: none !important; } }
+@media (max-width: 768px) { .only-desktop { display: none !important; } }
+
+.page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.page-title { margin: 0; font: 700 28px/1.2 var(--font-display); }
+.page-sub { margin: 4px 0 0; font-size: 10px; color: var(--color-muted); }
+.actions { display: flex; align-items: center; gap: 8px; }
+.toolbar { display: flex; gap: 10px; margin: 16px 0 12px; }
+.toolbar .input-sm { width: 200px; }
+
+.btn-sm { height: 32px; padding: 0 14px; font: 600 11px var(--font-body); color: var(--color-ink); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; cursor: pointer; }
+.btn-sm:hover { background: #faf7f0; }
+.btn-sm--gold { background: var(--color-gold); border-color: var(--color-gold); }
+.btn-sm--gold:hover { background: var(--color-gold-hover); }
+.btn-sm--lg { height: 36px; padding: 0 20px; font-size: 12px; }
+.btn-sm--block { width: 100%; height: 40px; font-size: 13px; }
+
+.panel-white { padding: 4px 20px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px; }
+.table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.table th { padding: 14px 0 10px; font: 500 8px var(--font-body); letter-spacing: 0.05em; text-transform: uppercase; color: var(--color-muted); text-align: left; border-bottom: 1px solid var(--color-line); }
+.table td { padding: 14px 0; border-bottom: 1px solid var(--color-line); }
+.table tr:last-child td { border-bottom: 0; }
+.table .num { text-align: right; }
+.mono { font-family: var(--font-mono); font-weight: 600; }
+.in { color: var(--color-income); }
+.out { color: var(--color-expense); }
+.muted { color: var(--color-muted); }
+.empty { padding: 28px 0; text-align: center; font-size: 12px; color: var(--color-muted); }
+.pager { display: flex; justify-content: center; align-items: center; gap: 12px; padding: 12px 0; font-size: 11px; color: var(--color-muted); }
+
+.input-sm { height: 30px; padding: 0 10px; font: 400 11px var(--font-body); color: var(--color-ink); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; }
+.input-sm:focus, .f input:focus, .f select:focus { outline: none; border-color: var(--color-gold); box-shadow: 0 0 0 3px rgb(201 157 60 / 0.2); }
+
+.card-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.card-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 14px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px; }
+.card-item p { margin: 0; }
+.card-item__title { font-size: 13px; font-weight: 600; }
+.card-item__meta { margin-top: 3px !important; font-size: 10px; color: var(--color-muted); }
+
+.pill { display: inline-block; padding: 2px 8px; font: 600 8px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-income); background: #eaf3ec; border: 1px solid #b9d6c2; border-radius: 999px; }
+.pill--off { color: var(--color-muted); background: var(--color-surface); border-color: var(--color-border); text-transform: none; }
+
+/* form di dalam modal */
+.f { display: flex; flex-direction: column; gap: 5px; margin-top: 10px; }
+.f label { font: 600 9px var(--font-body); }
+.f input, .f select { width: 100%; height: 32px; padding: 0 10px; font: 400 11px var(--font-body); color: var(--color-ink); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 6px; }
+.f__err { margin: 0; font-size: 10px; color: var(--color-danger); }
+.f-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.modal-actions { display: flex; gap: 10px; margin-top: 16px; }
+
+@media (max-width: 768px) {
+  .page-head { flex-direction: column; gap: 14px; }
+  .page-title { font-size: 22px; }
+  .page-sub { font-size: 11px; }
+  .f label { font-size: 11px; }
+  .f input, .f select { height: 40px; font-size: 13px; }
+}
+@media print {
+  .sidebar, .topbar, .bottomnav, .actions { display: none !important; }
+}
